@@ -1,0 +1,114 @@
+.section {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: end;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-h2);
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.card {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: rgba(12, 24, 43, 0.78);
+}
+
+.art {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: var(--color-surface-soft);
+}
+
+.artFallback {
+  display: grid;
+  place-items: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(121, 192, 255, 0.24), rgba(92, 226, 178, 0.22));
+  color: var(--color-text);
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.meta {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.feedName {
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.episodeTitle {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.supporting {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--color-text-soft);
+  font-size: var(--text-small);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.link {
+  color: var(--color-accent);
+  font-size: var(--text-small);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 720px) {
+  .card {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    align-items: flex-start;
+  }
+}

@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Build output
+dist/
+coverage/
+
+# Tooling and local state
+.wrangler/
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

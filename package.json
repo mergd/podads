@@ -1,0 +1,21 @@
+{
+  "name": "podads",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.3.11",
+  "workspaces": [
+    "ui",
+    "workers/api",
+    "workers/processor"
+  ],
+  "scripts": {
+    "build": "bun run --cwd ui build && bun run --cwd workers/api build && bun run --cwd workers/processor build",
+    "dev:ui": "bun run --cwd ui dev",
+    "lint": "bun run --cwd ui lint && bun run --cwd workers/api lint && bun run --cwd workers/processor lint",
+    "typecheck": "bun run --cwd ui typecheck && bun run --cwd workers/api typecheck && bun run --cwd workers/processor typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.40.3"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@podads/processor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types"
+  }
+}
