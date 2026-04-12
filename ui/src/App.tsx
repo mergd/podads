@@ -18,7 +18,7 @@ function AppHeader() {
           <span className={styles.brandMark}>P</span>
           <span className={styles.brandName}>podads</span>
         </Link>
-        {location.pathname === "/shows" ? <ShowsTopBarSearch /> : null}
+        <ShowsTopBarSearch key={location.pathname} />
         <nav className={styles.nav}>
           <Link className={styles.navLink} to="/" viewTransition>
             Home

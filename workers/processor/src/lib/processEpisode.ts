@@ -1,9 +1,155 @@
+import type { EpisodeProcessingSubstatus } from "@podads/shared/api";
+
 import { detectAdSpans } from "./adDetection";
 import { rewriteAudio } from "./audioRewrite";
 import { capturePostHogEvent } from "./posthog";
 import { getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
 import { generateTranscript } from "./transcription";
-import type { EpisodeJobMessage, EpisodeRecord } from "./types";
+import type { AudioRewriteManifest, EpisodeJobMessage, EpisodeRecord, TranscriptResult } from "./types";
+
+type ProcessingDetails = Record<string, unknown>;
+type PreviewSegment = {
+  startMs: number;
+  endMs: number;
+  text: string;
+};
+
+const TRANSCRIPT_PREVIEW_SEGMENT_LIMIT = 6;
+const OPENING_SIGNAL_WINDOW_MS = 5 * 60 * 1000;
+const SPONSOR_SIGNAL_PATTERNS = [
+  { label: "brought_to_you_by", pattern: /\bbrought to you by\b/i },
+  { label: "presented_by", pattern: /\bpresented by\b/i },
+  { label: "sponsored_by", pattern: /\bsponsored by\b/i },
+  { label: "support_from", pattern: /\bsupport (?:for|from)\b/i },
+  { label: "thanks_to_our_sponsor", pattern: /\bthanks to (?:our|today's) sponsor\b/i },
+  { label: "promo_code", pattern: /\bpromo code\b/i },
+  { label: "offer_code", pattern: /\boffer code\b/i },
+  { label: "use_code", pattern: /\buse code\b/i },
+  { label: "visit_url", pattern: /\b(?:visit|go to)\s+[a-z0-9.-]+\.[a-z]{2,}\b/i },
+  { label: "free_trial", pattern: /\bfree trial\b/i }
+] as const;
+
+function truncatePreviewText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length <= 180 ? normalized : `${normalized.slice(0, 177)}...`;
+}
+
+function buildTranscriptPreview(segments: TranscriptResult["segments"]): PreviewSegment[] {
+  return segments.slice(0, TRANSCRIPT_PREVIEW_SEGMENT_LIMIT).map((segment) => ({
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    text: truncatePreviewText(segment.text)
+  }));
+}
+
+function detectOpeningSponsorSignals(transcript: TranscriptResult): string[] {
+  const openingText = transcript.segments
+    .filter((segment) => segment.startMs < OPENING_SIGNAL_WINDOW_MS)
+    .map((segment) => segment.text)
+    .join(" ");
+
+  return SPONSOR_SIGNAL_PATTERNS.flatMap(({ label, pattern }) => (pattern.test(openingText) ? [label] : []));
+}
+
+function buildTranscriptDiagnostics(transcript: TranscriptResult): ProcessingDetails {
+  return {
+    transcriptSegmentCount: transcript.segments.length,
+    transcriptAnalysisWindowMs: transcript.analysisWindowMs,
+    transcriptAnalyzedDurationMs: transcript.analyzedDurationMs,
+    transcriptAnalysisTruncated: transcript.analysisTruncated,
+    transcriptOpeningPreview: buildTranscriptPreview(transcript.segments),
+    transcriptOpeningSponsorSignals: detectOpeningSponsorSignals(transcript)
+  };
+}
+
+function buildDetectionDiagnostics(transcript: TranscriptResult, detectionSpans: Array<{ startMs: number; reason: string }>): ProcessingDetails {
+  return {
+    adSpanCount: detectionSpans.length,
+    openingAdSpanCount: detectionSpans.filter((span) => span.startMs < OPENING_SIGNAL_WINDOW_MS).length,
+    adDetectionReasons: detectionSpans
+      .map((span) => span.reason.trim())
+      .filter((reason) => reason.length > 0)
+      .slice(0, 6),
+    transcriptOpeningSponsorSignals: detectOpeningSponsorSignals(transcript)
+  };
+}
+
+function buildRewriteDiagnostics(manifest: AudioRewriteManifest, removedDurationMs: number | null): ProcessingDetails {
+  return {
+    audioRewriteMode: manifest.mode,
+    removedDurationMs,
+    rewriteNotes: manifest.notes
+  };
+}
+
+function logEpisodeProcessingDiagnostics(
+  level: "info" | "warn",
+  event: string,
+  episodeId: number,
+  feedId: number,
+  details: ProcessingDetails
+): void {
+  const payload = JSON.stringify({
+    event,
+    episodeId,
+    feedId,
+    ...details
+  });
+
+  switch (level) {
+    case "info":
+      console.info(payload);
+      return;
+    case "warn":
+      console.warn(payload);
+      return;
+    default: {
+      const exhaustiveCheck: never = level;
+      throw new Error(`Unhandled log level: ${String(exhaustiveCheck)}`);
+    }
+  }
+}
+
+function parseProcessingDetails(value: string): ProcessingDetails {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as ProcessingDetails)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function withProcessingSubstatus(
+  details: ProcessingDetails,
+  substatus: EpisodeProcessingSubstatus | null,
+  timestamp: string,
+  extra: ProcessingDetails = {}
+): ProcessingDetails {
+  return {
+    ...details,
+    ...extra,
+    processingSubstatus: substatus,
+    processingSubstatusUpdatedAt: timestamp
+  };
+}
+
+async function updateEpisodeProcessingDetails(
+  db: D1Database,
+  episodeId: number,
+  details: ProcessingDetails,
+  updatedAt: string
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE episodes
+      SET processing_details_json = ?2, updated_at = ?3
+      WHERE id = ?1`
+    )
+    .bind(episodeId, JSON.stringify(details), updatedAt)
+    .run();
+}
 
 async function loadEpisode(db: D1Database, episodeId: number): Promise<EpisodeRecord | null> {
   const episode = await db
@@ -19,7 +165,11 @@ async function loadEpisode(db: D1Database, episodeId: number): Promise<EpisodeRe
   return episode ?? null;
 }
 
-async function markJobProcessing(db: D1Database, message: EpisodeJobMessage): Promise<void> {
+async function markJobProcessing(
+  db: D1Database,
+  message: EpisodeJobMessage,
+  processingDetailsJson: string
+): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
@@ -33,14 +183,19 @@ async function markJobProcessing(db: D1Database, message: EpisodeJobMessage): Pr
   await db
     .prepare(
       `UPDATE episodes
-      SET processing_status = 'processing', processing_version = ?2, last_error = NULL, updated_at = ?3
+      SET processing_status = 'processing', processing_version = ?2, processing_details_json = ?3, last_error = NULL, updated_at = ?4
       WHERE id = ?1`
     )
-    .bind(message.episodeId, message.processingVersion, now)
+    .bind(message.episodeId, message.processingVersion, processingDetailsJson, now)
     .run();
 }
 
-async function markJobFailed(db: D1Database, message: EpisodeJobMessage, errorMessage: string): Promise<void> {
+async function markJobFailed(
+  db: D1Database,
+  message: EpisodeJobMessage,
+  errorMessage: string,
+  processingDetailsJson: string
+): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
@@ -54,17 +209,18 @@ async function markJobFailed(db: D1Database, message: EpisodeJobMessage, errorMe
   await db
     .prepare(
       `UPDATE episodes
-      SET processing_status = 'failed', last_error = ?2, updated_at = ?3
+      SET processing_status = 'failed', processing_details_json = ?2, last_error = ?3, updated_at = ?4
       WHERE id = ?1`
     )
-    .bind(message.episodeId, errorMessage, now)
+    .bind(message.episodeId, processingDetailsJson, errorMessage, now)
     .run();
 }
 
 async function markJobQueuedForRetry(
   db: D1Database,
   message: EpisodeJobMessage,
-  errorMessage: string
+  errorMessage: string,
+  processingDetailsJson: string
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
@@ -79,10 +235,10 @@ async function markJobQueuedForRetry(
   await db
     .prepare(
       `UPDATE episodes
-      SET processing_status = 'pending', last_error = ?2, updated_at = ?3
+      SET processing_status = 'pending', processing_details_json = ?2, last_error = ?3, updated_at = ?4
       WHERE id = ?1`
     )
-    .bind(message.episodeId, errorMessage, now)
+    .bind(message.episodeId, processingDetailsJson, errorMessage, now)
     .run();
 }
 
@@ -143,11 +299,23 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     throw new Error(`Episode ${message.episodeId} could not be loaded.`);
   }
 
-  await markJobProcessing(env.DB, message);
-
   const distinctId = `episode:${episode.id}`;
   const queueDelayMs = Date.now() - Date.parse(message.enqueuedAt);
+  const processingStartedAt = new Date().toISOString();
+  const baseProcessingDetails = parseProcessingDetails(episode.processing_details_json);
+  let processingDetails = withProcessingSubstatus(baseProcessingDetails, "transcribing", processingStartedAt, {
+    currentJobId: message.jobId,
+    enqueuedAt: message.enqueuedAt,
+    queueAttempt: message.pollAttempt ?? 0,
+    queueDelayMs: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
+    processingStartedAt
+  });
+
+  await markJobProcessing(env.DB, message, JSON.stringify(processingDetails));
+
   const transcript = await generateTranscript(env, episode, message.processingVersion, {});
+  const transcriptDiagnostics = buildTranscriptDiagnostics(transcript);
+  logEpisodeProcessingDiagnostics("info", "episode_transcript_diagnostics", episode.id, episode.feed_id, transcriptDiagnostics);
   await capturePostHogEvent(env, distinctId, "transcript_completed", {
     provider: transcript.provider,
     model: transcript.model,
@@ -165,7 +333,35 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     feed_id: episode.feed_id
   });
 
+  {
+    const detectingAdsAt = new Date().toISOString();
+    processingDetails = withProcessingSubstatus(processingDetails, "detecting_ads", detectingAdsAt, {
+      transcriptCompletedAt: detectingAdsAt,
+      transcriptProvider: transcript.provider,
+      transcriptModel: transcript.model,
+      transcriptRequestDurationMs: transcript.requestDurationMs ?? null,
+      transcriptProviderQueueDelayMs: transcript.providerQueueDelayMs ?? null,
+      transcriptProviderExecutionMs: transcript.providerExecutionMs ?? null,
+      ...transcriptDiagnostics
+    });
+    await updateEpisodeProcessingDetails(env.DB, message.episodeId, processingDetails, detectingAdsAt);
+  }
+
   const detection = await detectAdSpans(env, transcript);
+  const detectionDiagnostics = buildDetectionDiagnostics(transcript, detection.spans);
+  logEpisodeProcessingDiagnostics("info", "episode_ad_detection_diagnostics", episode.id, episode.feed_id, {
+    classificationProvider: detection.provider,
+    classificationModel: detection.model,
+    ...detectionDiagnostics
+  });
+  if (detection.spans.length === 0) {
+    logEpisodeProcessingDiagnostics("warn", "episode_zero_ad_spans_detected", episode.id, episode.feed_id, {
+      classificationProvider: detection.provider,
+      classificationModel: detection.model,
+      ...transcriptDiagnostics,
+      ...detectionDiagnostics
+    });
+  }
   await capturePostHogEvent(env, distinctId, "ad_detection_completed", {
     provider: detection.provider,
     model: detection.model,
@@ -178,6 +374,18 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     episode_id: episode.id,
     feed_id: episode.feed_id
   });
+
+  {
+    const rewritingAudioAt = new Date().toISOString();
+    processingDetails = withProcessingSubstatus(processingDetails, "rewriting_audio", rewritingAudioAt, {
+      adDetectionCompletedAt: rewritingAudioAt,
+      classificationProvider: detection.provider,
+      classificationModel: detection.model,
+      classificationRequestDurationMs: detection.requestDurationMs ?? null,
+      ...detectionDiagnostics
+    });
+    await updateEpisodeProcessingDetails(env.DB, message.episodeId, processingDetails, rewritingAudioAt);
+  }
 
   const transcriptKey = `transcripts/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const adSpansKey = `ad-spans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
@@ -206,12 +414,31 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     feedId: String(episode.feed_id)
   });
 
+  {
+    const finalizingAt = new Date().toISOString();
+    processingDetails = withProcessingSubstatus(processingDetails, "finalizing", finalizingAt, {
+      audioRewriteCompletedAt: finalizingAt,
+      transcriptKey,
+      adSpansKey,
+      splicePlanKey,
+      bytesWritten: audioOutput.bytesWritten,
+      audioRewriteMode: audioOutput.manifest.mode
+    });
+    await updateEpisodeProcessingDetails(env.DB, message.episodeId, processingDetails, finalizingAt);
+  }
+
   const totalEstimatedCost = transcript.estimatedCostUsd + detection.estimatedCostUsd;
   const removedDurationMs =
     audioOutput.manifest.sourceDurationMs !== null && audioOutput.manifest.cleanedDurationMs !== null
       ? audioOutput.manifest.sourceDurationMs - audioOutput.manifest.cleanedDurationMs
       : null;
-  const processingDetails = {
+  const rewriteDiagnostics = buildRewriteDiagnostics(audioOutput.manifest, removedDurationMs);
+  logEpisodeProcessingDiagnostics("info", "episode_audio_rewrite_diagnostics", episode.id, episode.feed_id, rewriteDiagnostics);
+  const completedAt = new Date().toISOString();
+  const finalProcessingDetails = {
+    ...processingDetails,
+    processingSubstatus: null,
+    processingSubstatusUpdatedAt: completedAt,
     transcriptProvider: transcript.provider,
     transcriptModel: transcript.model,
     transcriptAnalysisWindowMs: transcript.analysisWindowMs,
@@ -231,15 +458,14 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     classificationCompletionTokens: detection.completionTokens ?? null,
     classificationTotalTokens: detection.totalTokens ?? null,
     totalEstimatedCostUsd: totalEstimatedCost,
-    adSpanCount: detection.spans.length,
     queueDelayMs: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
-    batchWindowSeconds: message.batchWindowSeconds ?? null,
     bytesWritten: audioOutput.bytesWritten,
-    audioRewriteMode: audioOutput.manifest.mode,
     sourceDurationMs: audioOutput.manifest.sourceDurationMs,
     cleanedDurationMs: audioOutput.manifest.cleanedDurationMs,
-    removedDurationMs,
-    splicePlanKey
+    splicePlanKey,
+    ...transcriptDiagnostics,
+    ...detectionDiagnostics,
+    ...rewriteDiagnostics
   };
 
   await markJobComplete(
@@ -248,7 +474,7 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     audioOutput.key,
     transcriptKey,
     adSpansKey,
-    JSON.stringify(processingDetails)
+    JSON.stringify(finalProcessingDetails)
   );
 
   await capturePostHogEvent(env, distinctId, "episode_processing_completed", {
@@ -260,7 +486,6 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     audio_rewrite_mode: audioOutput.manifest.mode,
     removed_duration_ms: removedDurationMs,
     queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
-    batch_window_seconds: message.batchWindowSeconds ?? null,
     transcript_provider_queue_delay_ms: transcript.providerQueueDelayMs ?? null,
     transcript_provider_execution_ms: transcript.providerExecutionMs ?? null,
     processing_total_ms: Date.now() - startedAt
@@ -277,17 +502,31 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     return { kind: "ack" };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown episode processing failure";
+    const now = new Date().toISOString();
+    const failureProcessingDetails = JSON.stringify(
+      withProcessingSubstatus({}, null, now, {
+        currentJobId: message.jobId,
+        failedAt: now
+      })
+    );
 
     if (isRetryableProcessingError(error)) {
       const delaySeconds = getRetryDelaySeconds(error, 60);
+      const retryProcessingDetails = JSON.stringify(
+        withProcessingSubstatus({}, "retry_scheduled", now, {
+          currentJobId: message.jobId,
+          retryDelaySeconds: delaySeconds,
+          retryScheduledAt: now,
+          queueAttempt: message.pollAttempt ?? 0
+        })
+      );
 
-      await markJobQueuedForRetry(env.DB, message, errorMessage);
+      await markJobQueuedForRetry(env.DB, message, errorMessage, retryProcessingDetails);
       await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_retry_scheduled", {
         episode_id: message.episodeId,
         feed_id: message.feedId,
         error: errorMessage,
-        retry_delay_seconds: delaySeconds,
-        batch_window_seconds: message.batchWindowSeconds ?? null
+        retry_delay_seconds: delaySeconds
       });
 
       return {
@@ -296,12 +535,11 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
       };
     }
 
-    await markJobFailed(env.DB, message, errorMessage);
+    await markJobFailed(env.DB, message, errorMessage, failureProcessingDetails);
     await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_failed", {
       episode_id: message.episodeId,
       feed_id: message.feedId,
-      error: errorMessage,
-      batch_window_seconds: message.batchWindowSeconds ?? null
+      error: errorMessage
     });
     return { kind: "ack" };
   }

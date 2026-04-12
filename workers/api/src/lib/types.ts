@@ -1,10 +1,19 @@
-import type { EpisodeProcessingStatus, FeedStatus } from "@podads/shared/api";
+import type {
+  EpisodeProcessingDiagnostics,
+  EpisodeProcessingPreviewSegment,
+  EpisodeProcessingStatus,
+  EpisodeProcessingSubstatus,
+  FeedStatus
+} from "@podads/shared/api";
 
 export type {
   ComplaintRequest,
+  EpisodeProcessingDiagnostics,
+  EpisodeProcessingPreviewSegment,
   FeedLookupResponse,
   FeedPreviewEpisode,
   FeedPreviewResponse,
+  EpisodeProcessingSubstatus,
   EpisodeProcessingStatus,
   EpisodeSummary,
   FeedDetailResponse,

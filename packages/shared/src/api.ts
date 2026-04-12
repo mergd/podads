@@ -1,5 +1,33 @@
 export type FeedStatus = "pending" | "ready" | "error";
 export type EpisodeProcessingStatus = "pending" | "processing" | "ready" | "failed" | "skipped";
+export type EpisodeProcessingSubstatus =
+  | "queued"
+  | "retry_scheduled"
+  | "transcribing"
+  | "detecting_ads"
+  | "rewriting_audio"
+  | "finalizing";
+
+export interface EpisodeProcessingPreviewSegment {
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+export interface EpisodeProcessingDiagnostics {
+  transcriptSegmentCount: number | null;
+  transcriptAnalysisWindowMs: number | null;
+  transcriptAnalyzedDurationMs: number | null;
+  transcriptAnalysisTruncated: boolean | null;
+  transcriptOpeningPreview: EpisodeProcessingPreviewSegment[];
+  transcriptOpeningSponsorSignals: string[];
+  detectedAdSpanCount: number | null;
+  openingAdSpanCount: number | null;
+  adDetectionReasons: string[];
+  audioRewriteMode: "mp3-frame-splice" | "passthrough" | null;
+  removedDurationMs: number | null;
+  rewriteNotes: string[];
+}
 
 export interface FeedSummary {
   id: number;
@@ -36,6 +64,8 @@ export interface EpisodeSummary {
   sourceEnclosureLength: string | null;
   cleanedEnclosureUrl: string | null;
   processingStatus: EpisodeProcessingStatus;
+  processingSubstatus: EpisodeProcessingSubstatus | null;
+  processingDiagnostics: EpisodeProcessingDiagnostics | null;
   lastError: string | null;
   reportUrl: string;
 }

@@ -5,7 +5,6 @@ export interface EpisodeQueueMessage {
   episodeId: number;
   processingVersion: string;
   enqueuedAt: string;
-  batchWindowSeconds?: number;
   expectedDurationSeconds?: number;
   pollAttempt?: number;
 }

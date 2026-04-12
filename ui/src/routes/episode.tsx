@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
 import { HtmlContent } from "../components/HtmlContent";
+import { InlineAudioPlayer } from "../components/InlineAudioPlayer";
 import { Skeleton } from "../components/Skeleton";
 import { fetchFeed } from "../lib/api";
 import { formatEpisodeDuration, isNewContent, shortDate } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import { captureUiEvent } from "../lib/posthog";
+import { getEpisodeAudioStateCopy, getEpisodeStatusLabel, getEpisodeTimeSavedLabel } from "../lib/processing";
 import type { EpisodeSummary, FeedDetailResponse } from "@podads/shared/api";
 import styles from "./episode.module.css";
 
@@ -147,11 +149,23 @@ export function EpisodePage() {
     );
   }
 
+  const feedTitle = decodeEntities(detail.feed.title);
+  const episodeTitle = decodeEntities(episode.title);
+  const playbackUrl = episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl;
+  const playbackLabel = hasAdFreeAudio
+    ? `Play ad-free audio for ${episodeTitle}`
+    : `Play original audio for ${episodeTitle}`;
+  const timeSavedLabel = getEpisodeTimeSavedLabel(
+    episode.processingStatus,
+    episode.processingDiagnostics,
+    hasAdFreeAudio
+  );
+
   return (
     <div className={styles.page}>
       <div className={styles.backRow}>
         <Link className={styles.backLink} to={`/${detail.feed.slug}`} viewTransition>
-          Back to {decodeEntities(detail.feed.title)}
+          Back to {feedTitle}
         </Link>
       </div>
 
@@ -172,7 +186,7 @@ export function EpisodePage() {
         <div className={styles.heroContent}>
           <div className={styles.eyebrowRow}>
             <Link className={styles.feedLink} to={`/${detail.feed.slug}`} viewTransition>
-              {decodeEntities(detail.feed.title)}
+              {feedTitle}
             </Link>
             {isNewContent(episode.pubDate) ? <span className={styles.newBadge}>New</span> : null}
             <Link
@@ -185,32 +199,37 @@ export function EpisodePage() {
           </div>
 
           <h1 className={styles.title} style={{ viewTransitionName: `episode-title-${slug}-${episodeId}` }}>
-            {decodeEntities(episode.title)}
+            {episodeTitle}
           </h1>
 
           <div className={styles.meta}>
             {episode.pubDate ? <span>{shortDate(episode.pubDate)}</span> : null}
             {episode.duration ? <span>{formatEpisodeDuration(episode.duration)}</span> : null}
             {episode.author ? <span>{episode.author}</span> : null}
+            <span>{getEpisodeStatusLabel(episode.processingStatus, episode.processingSubstatus)}</span>
           </div>
 
           <div className={styles.audioState} data-ready={hasAdFreeAudio}>
-            {hasAdFreeAudio
-              ? "Ad-free audio is ready."
-              : "Ad-free audio is still processing. You can play the official episode audio for now."}
+            {getEpisodeAudioStateCopy(episode.processingStatus, episode.processingSubstatus, hasAdFreeAudio)}
           </div>
+          {timeSavedLabel ? (
+            <div
+              className={styles.timeSaved}
+              data-positive={(episode.processingDiagnostics?.removedDurationMs ?? 0) > 0}
+            >
+              {timeSavedLabel}
+            </div>
+          ) : null}
 
           {episode.description ? <HtmlContent className={styles.description} html={episode.description} /> : null}
 
           <div className={styles.actions}>
-            <a
-              className={styles.primaryButton}
-              href={episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {hasAdFreeAudio ? "Play ad-free audio" : "Play original audio"}
-            </a>
+            <InlineAudioPlayer
+              className={styles.audioPlayer}
+              label={playbackLabel}
+              src={playbackUrl}
+              type={episode.sourceEnclosureType}
+            />
             {episode.episodeLink ? (
               <a className={styles.secondaryButton} href={episode.episodeLink} rel="noreferrer" target="_blank">
                 Official Episode Page

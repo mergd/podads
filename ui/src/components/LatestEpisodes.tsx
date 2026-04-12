@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 
 import { formatEpisodeDuration, isNewContent, shortDate } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
+import { getEpisodeStatusLabel } from "../lib/processing";
 import styles from "./LatestEpisodes.module.css";
 import type { EpisodeSummary } from "@podads/shared/api";
 
@@ -45,7 +46,7 @@ export function LatestEpisodes({ episodes }: LatestEpisodesProps) {
             </div>
             <div className={styles.actions}>
               <span className={styles.status} data-status={episode.processingStatus}>
-                {episode.processingStatus}
+                {getEpisodeStatusLabel(episode.processingStatus, episode.processingSubstatus)}
               </span>
             </div>
           </article>

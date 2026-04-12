@@ -32,16 +32,6 @@ function getMaxProcessableEpisodesPerFeed(env: Env): number {
   return parsed;
 }
 
-function getProcessingBatchWindowSeconds(env: Env): number {
-  const parsed = Number.parseInt(env.PROCESSING_BATCH_WINDOW_SECONDS, 10);
-
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 0;
-  }
-
-  return parsed;
-}
-
 export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
   const source = await fetchSourceFeed(feed.source_url);
   await updateFeedFromSource(env.DB, feed.id, source);
@@ -49,7 +39,6 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
   await markExcessEpisodesSkipped(env.DB, feed.id, getMaxProcessableEpisodesPerFeed(env));
 
   const episodesToProcess = await selectEpisodesForProcessing(env.DB, feed.id, getMaxEpisodesPerRefresh(env));
-  const batchWindowSeconds = getProcessingBatchWindowSeconds(env);
   const enqueuedAt = new Date().toISOString();
   const messages: EpisodeQueueMessage[] = episodesToProcess.map((episode) => ({
     type: "episode.process",
@@ -58,15 +47,12 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
     episodeId: episode.id,
     processingVersion: env.PROCESSING_VERSION,
     enqueuedAt,
-    batchWindowSeconds,
     expectedDurationSeconds: episode.expectedDurationSeconds,
     pollAttempt: 0
   }));
 
   if (messages.length > 0) {
-    await enqueueEpisodeJobs(env.DB, env.PROCESSING_QUEUE, messages, {
-      delaySeconds: batchWindowSeconds
-    });
+    await enqueueEpisodeJobs(env.DB, env.PROCESSING_QUEUE, messages);
   }
 
   await capturePostHogEvent(env, {
@@ -75,7 +61,6 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
     properties: {
       episode_count: source.episodes.length,
       enqueued_episodes: messages.length,
-      processing_batch_window_seconds: batchWindowSeconds,
       feed_slug: feed.slug
     }
   });

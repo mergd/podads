@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
 import { HtmlContent } from "../components/HtmlContent";
+import { InlineAudioPlayer } from "../components/InlineAudioPlayer";
 import { Skeleton } from "../components/Skeleton";
 import { SubscribeButtons } from "../components/SubscribeButtons";
 import { formatEpisodeDuration, isNewContent, lastUpdatedLabel, shortDate } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import { fetchFeed } from "../lib/api";
 import { captureUiEvent } from "../lib/posthog";
+import { getEpisodeStatusLabel, getEpisodeTimeSavedLabel } from "../lib/processing";
 import type { FeedDetailResponse } from "@podads/shared/api";
 import styles from "./feed.module.css";
 
@@ -147,56 +149,72 @@ export function FeedPage() {
             <span className={styles.count}>{detail.episodes.length}</span>
           </h2>
           <div className={styles.list}>
-            {detail.episodes.map((episode) => (
-              <article className={styles.episode} key={episode.id}>
-                {episode.imageUrl ? (
-                  <div className={styles.episodeArtWrap}>
-                    <img alt="" className={styles.episodeArt} loading="lazy" src={episode.imageUrl} />
+            {detail.episodes.map((episode) => {
+              const episodeTitle = decodeEntities(episode.title);
+              const playbackUrl = episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl;
+              const timeSavedLabel = getEpisodeTimeSavedLabel(
+                episode.processingStatus,
+                episode.processingDiagnostics,
+                Boolean(episode.cleanedEnclosureUrl)
+              );
+
+              return (
+                <article className={styles.episode} key={episode.id}>
+                  {episode.imageUrl ? (
+                    <div className={styles.episodeArtWrap}>
+                      <img alt="" className={styles.episodeArt} loading="lazy" src={episode.imageUrl} />
+                    </div>
+                  ) : null}
+                  <div className={styles.episodeContent}>
+                    <div className={styles.episodeTitleRow}>
+                      <Link className={styles.episodeTitleLink} state={{ title: episode.title, imageUrl: episode.imageUrl ?? detail.feed.imageUrl, feedTitle: detail.feed.title }} to={`/${episode.feedSlug}/episodes/${episode.id}`} viewTransition>
+                        <h3
+                          className={styles.episodeName}
+                          style={{ viewTransitionName: `episode-title-${episode.feedSlug}-${episode.id}` }}
+                        >
+                          {episodeTitle}
+                        </h3>
+                      </Link>
+                      {isNewContent(episode.pubDate) ? <span className={styles.newBadge}>New</span> : null}
+                    </div>
+                    <div className={styles.episodeMeta}>
+                      <span className={styles.status} data-status={episode.processingStatus}>
+                        {getEpisodeStatusLabel(episode.processingStatus, episode.processingSubstatus)}
+                      </span>
+                      {timeSavedLabel ? (
+                        <span
+                          className={styles.timeSaved}
+                          data-positive={(episode.processingDiagnostics?.removedDurationMs ?? 0) > 0}
+                        >
+                          {timeSavedLabel}
+                        </span>
+                      ) : null}
+                      {episode.pubDate ? <span>{shortDate(episode.pubDate)}</span> : null}
+                      {episode.duration ? <span>{formatEpisodeDuration(episode.duration)}</span> : null}
+                    </div>
+                    {episode.description ? (
+                      <HtmlContent className={styles.episodeDesc} html={episode.description} />
+                    ) : null}
+                    <InlineAudioPlayer
+                      className={styles.inlinePlayer}
+                      label={`Play ${episodeTitle}`}
+                      src={playbackUrl}
+                      type={episode.sourceEnclosureType}
+                    />
                   </div>
-                ) : null}
-                <div className={styles.episodeContent}>
-                  <div className={styles.episodeTitleRow}>
-                    <Link className={styles.episodeTitleLink} state={{ title: episode.title, imageUrl: episode.imageUrl ?? detail.feed.imageUrl, feedTitle: detail.feed.title }} to={`/${episode.feedSlug}/episodes/${episode.id}`} viewTransition>
-                      <h3
-                        className={styles.episodeName}
-                        style={{ viewTransitionName: `episode-title-${episode.feedSlug}-${episode.id}` }}
-                      >
-                        {decodeEntities(episode.title)}
-                      </h3>
+                  <div className={styles.episodeActions}>
+                    {episode.episodeLink ? (
+                      <a className={styles.link} href={episode.episodeLink} rel="noreferrer" target="_blank">
+                        Episode page
+                      </a>
+                    ) : null}
+                    <Link className={styles.link} to={`/report?feed=${episode.feedSlug}&episode=${episode.id}`} viewTransition>
+                      Report
                     </Link>
-                    {isNewContent(episode.pubDate) ? <span className={styles.newBadge}>New</span> : null}
                   </div>
-                  <div className={styles.episodeMeta}>
-                    <span className={styles.status} data-status={episode.processingStatus}>
-                      {episode.processingStatus}
-                    </span>
-                    {episode.pubDate ? <span>{shortDate(episode.pubDate)}</span> : null}
-                    {episode.duration ? <span>{formatEpisodeDuration(episode.duration)}</span> : null}
-                  </div>
-                  {episode.description ? (
-                    <HtmlContent className={styles.episodeDesc} html={episode.description} />
-                  ) : null}
-                </div>
-                <div className={styles.episodeActions}>
-                  <a
-                    className={styles.link}
-                    href={episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Audio
-                  </a>
-                  {episode.episodeLink ? (
-                    <a className={styles.link} href={episode.episodeLink} rel="noreferrer" target="_blank">
-                      Episode page
-                    </a>
-                  ) : null}
-                  <Link className={styles.link} to={`/report?feed=${episode.feedSlug}&episode=${episode.id}`} viewTransition>
-                    Report
-                  </Link>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}

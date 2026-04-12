@@ -30,7 +30,6 @@
     "PROCESSING_VERSION": "v1",
     "MAX_EPISODES_PER_FEED_REFRESH": "2",
     "MAX_PROCESSABLE_EPISODES_PER_FEED": "2",
-    "PROCESSING_BATCH_WINDOW_SECONDS": "1800",
     "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "triggers": {

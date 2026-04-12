@@ -32,7 +32,6 @@ function parseMessage(payloadJson: string): EpisodeJobMessage | null {
       episodeId: payload.episodeId,
       processingVersion: payload.processingVersion,
       enqueuedAt: typeof payload.enqueuedAt === "string" ? payload.enqueuedAt : new Date().toISOString(),
-      batchWindowSeconds: payload.batchWindowSeconds,
       expectedDurationSeconds: payload.expectedDurationSeconds,
       pollAttempt: payload.pollAttempt
     };
@@ -96,6 +95,14 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
       pollAttempt: (message.pollAttempt ?? 0) + 1
     };
     const errorMessage = `Recovered stale processing job after ${staleAfterSeconds}s without completion.`;
+    const queuedDetails = JSON.stringify({
+      processingSubstatus: "queued",
+      processingSubstatusUpdatedAt: now,
+      queuedAt: now,
+      currentJobId: retryMessage.jobId,
+      queueAttempt: retryMessage.pollAttempt ?? 0,
+      recoveryReason: errorMessage
+    });
 
     await env.DB.batch([
       env.DB
@@ -108,10 +115,10 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
       env.DB
         .prepare(
           `UPDATE episodes
-          SET processing_status = 'pending', last_error = ?2, updated_at = ?3
+          SET processing_status = 'pending', processing_details_json = ?2, last_error = ?3, updated_at = ?4
           WHERE id = ?1 AND processing_status = 'processing'`
         )
-        .bind(episodeId, errorMessage, now)
+        .bind(episodeId, queuedDetails, errorMessage, now)
     ]);
 
     await env.PROCESSING_QUEUE.sendBatch([

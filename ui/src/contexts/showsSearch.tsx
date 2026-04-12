@@ -8,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useLocation } from "react-router-dom";
 
 import { fetchFeeds } from "../lib/api";
 import type { FeedSummary } from "@podads/shared/api";
@@ -25,7 +24,6 @@ type ShowsSearchContextValue = {
 const ShowsSearchContext = createContext<ShowsSearchContextValue | null>(null);
 
 export function ShowsSearchProvider({ children }: { children: ReactNode }) {
-  const location = useLocation();
   const [feeds, setFeeds] = useState<FeedSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -59,9 +57,8 @@ export function ShowsSearchProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (location.pathname !== "/shows") return;
     void load(queryRef.current);
-  }, [location.pathname, load]);
+  }, [load]);
 
   const value = useMemo(
     () => ({

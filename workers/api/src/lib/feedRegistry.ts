@@ -1,5 +1,8 @@
 import type {
+  EpisodeProcessingDiagnostics,
+  EpisodeProcessingPreviewSegment,
   EpisodeProcessingStatus,
+  EpisodeProcessingSubstatus,
   EpisodeQueueMessage,
   EpisodeRow,
   EpisodeSummary,
@@ -22,6 +25,115 @@ function parseJsonArray(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeProcessingSubstatus(value: unknown): EpisodeProcessingSubstatus | null {
+  switch (value) {
+    case "queued":
+    case "retry_scheduled":
+    case "transcribing":
+    case "detecting_ads":
+    case "rewriting_audio":
+    case "finalizing":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function parseNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function parseStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function normalizeAudioRewriteMode(value: unknown): EpisodeProcessingDiagnostics["audioRewriteMode"] {
+  switch (value) {
+    case "mp3-frame-splice":
+    case "passthrough":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function parsePreviewSegments(value: unknown): EpisodeProcessingPreviewSegment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const startMs = parseNumber(candidate.startMs);
+    const endMs = parseNumber(candidate.endMs);
+    const text = typeof candidate.text === "string" ? candidate.text : null;
+
+    if (startMs === null || endMs === null || text === null) {
+      return [];
+    }
+
+    return [
+      {
+        startMs,
+        endMs,
+        text
+      }
+    ];
+  });
+}
+
+function buildEpisodeProcessingDiagnostics(details: Record<string, unknown>): EpisodeProcessingDiagnostics | null {
+  const diagnostics: EpisodeProcessingDiagnostics = {
+    transcriptSegmentCount: parseNumber(details.transcriptSegmentCount),
+    transcriptAnalysisWindowMs: parseNumber(details.transcriptAnalysisWindowMs),
+    transcriptAnalyzedDurationMs: parseNumber(details.transcriptAnalyzedDurationMs),
+    transcriptAnalysisTruncated: parseBoolean(details.transcriptAnalysisTruncated),
+    transcriptOpeningPreview: parsePreviewSegments(details.transcriptOpeningPreview),
+    transcriptOpeningSponsorSignals: parseStringArray(details.transcriptOpeningSponsorSignals),
+    detectedAdSpanCount: parseNumber(details.adSpanCount),
+    openingAdSpanCount: parseNumber(details.openingAdSpanCount),
+    adDetectionReasons: parseStringArray(details.adDetectionReasons),
+    audioRewriteMode: normalizeAudioRewriteMode(details.audioRewriteMode),
+    removedDurationMs: parseNumber(details.removedDurationMs),
+    rewriteNotes: parseStringArray(details.rewriteNotes)
+  };
+
+  const hasSignal =
+    diagnostics.transcriptSegmentCount !== null ||
+    diagnostics.transcriptAnalysisWindowMs !== null ||
+    diagnostics.transcriptAnalyzedDurationMs !== null ||
+    diagnostics.transcriptAnalysisTruncated !== null ||
+    diagnostics.transcriptOpeningPreview.length > 0 ||
+    diagnostics.transcriptOpeningSponsorSignals.length > 0 ||
+    diagnostics.detectedAdSpanCount !== null ||
+    diagnostics.openingAdSpanCount !== null ||
+    diagnostics.adDetectionReasons.length > 0 ||
+    diagnostics.audioRewriteMode !== null ||
+    diagnostics.removedDurationMs !== null ||
+    diagnostics.rewriteNotes.length > 0;
+
+  return hasSignal ? diagnostics : null;
 }
 
 interface FeedRowWithStats extends FeedRow {
@@ -171,6 +283,8 @@ function buildEpisodeSummary(
   baseUrl: string,
   uiBaseUrl: string
 ): EpisodeSummary {
+  const processingDetails = parseJsonObject(row.processing_details_json);
+
   return {
     id: row.id,
     feedId: row.feed_id,
@@ -189,6 +303,8 @@ function buildEpisodeSummary(
     sourceEnclosureLength: row.source_enclosure_length,
     cleanedEnclosureUrl: row.cleaned_enclosure_key ? `${baseUrl}/audio/${row.feed_slug}/${row.id}.mp3` : null,
     processingStatus: row.processing_status,
+    processingSubstatus: normalizeProcessingSubstatus(processingDetails.processingSubstatus),
+    processingDiagnostics: buildEpisodeProcessingDiagnostics(processingDetails),
     lastError: row.last_error,
     reportUrl: `${uiBaseUrl}/report?feed=${encodeURIComponent(row.feed_slug)}&episode=${row.id}`
   };
@@ -513,32 +629,46 @@ export async function selectGlobalPendingEpisodesForProcessing(
 export async function enqueueEpisodeJobs(
   db: D1Database,
   queue: Queue,
-  messages: EpisodeQueueMessage[],
-  options?: {
-    delaySeconds?: number;
-  }
+  messages: EpisodeQueueMessage[]
 ): Promise<void> {
   if (messages.length === 0) {
     return;
   }
 
   const now = new Date().toISOString();
-  const statements = messages.map((message) =>
-    db
-      .prepare(
-        `INSERT OR REPLACE INTO jobs (
-          id,
-          kind,
-          feed_id,
-          episode_id,
-          status,
-          attempts,
-          payload_json,
-          updated_at
-        ) VALUES (?1, 'episode.process', ?2, ?3, 'queued', 0, ?4, ?5)`
-      )
-      .bind(message.jobId, message.feedId, message.episodeId, JSON.stringify(message), now)
-  );
+  const statements = messages.flatMap((message) => {
+    const queuedDetails = JSON.stringify({
+      processingSubstatus: "queued",
+      processingSubstatusUpdatedAt: now,
+      queuedAt: message.enqueuedAt,
+      currentJobId: message.jobId,
+      queueAttempt: message.pollAttempt ?? 0
+    });
+
+    return [
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO jobs (
+            id,
+            kind,
+            feed_id,
+            episode_id,
+            status,
+            attempts,
+            payload_json,
+            updated_at
+          ) VALUES (?1, 'episode.process', ?2, ?3, 'queued', 0, ?4, ?5)`
+        )
+        .bind(message.jobId, message.feedId, message.episodeId, JSON.stringify(message), now),
+      db
+        .prepare(
+          `UPDATE episodes
+          SET processing_details_json = ?2, updated_at = ?3
+          WHERE id = ?1`
+        )
+        .bind(message.episodeId, queuedDetails, now)
+    ];
+  });
 
   for (const chunk of chunkArray(statements, D1_BATCH_SIZE)) {
     await db.batch(chunk);
@@ -547,8 +677,7 @@ export async function enqueueEpisodeJobs(
   for (const chunk of chunkArray(messages, D1_BATCH_SIZE)) {
     await queue.sendBatch(
       chunk.map((message) => ({
-        body: message,
-        ...(options?.delaySeconds ? { delaySeconds: options.delaySeconds } : {})
+        body: message
       }))
     );
   }
