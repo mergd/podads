@@ -75,7 +75,12 @@ export function FeedPage() {
             <Skeleton variant="rounded" width="7rem" height="7rem" style={{ viewTransitionName: `feed-art-${slug}` }} />
           )}
           <div className={styles.heroContent}>
-            <Skeleton width={80} height={10} />
+            <div className={styles.eyebrowRow}>
+              <div className={styles.eyebrow}>Proxied feed</div>
+              <Link className={styles.reportLink} to={`/report?feed=${slug}`} viewTransition>
+                Report a problem
+              </Link>
+            </div>
             {previewTitle ? (
               <h1 className={styles.title} style={{ viewTransitionName: `feed-title-${slug}` }}>{previewTitle}</h1>
             ) : (
@@ -90,7 +95,7 @@ export function FeedPage() {
           </div>
         </section>
         <section className={styles.episodes}>
-          <Skeleton width={100} height={20} />
+          <h2 className={styles.sectionTitle}>Episodes</h2>
           <div className={styles.list}>
             {Array.from({ length: 5 }, (_, i) => (
               <div className={styles.skeletonEpisode} key={i}>

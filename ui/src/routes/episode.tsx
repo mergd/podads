@@ -177,15 +177,22 @@ export function EpisodePage() {
             <Skeleton variant="rounded" width="7rem" height="7rem" style={{ viewTransitionName: `feed-art-${slug}` }} />
           )}
           <div className={styles.heroContent}>
-            {previewFeedTitle ? (
-              <div className={styles.eyebrowRow}>
+            <div className={styles.eyebrowRow}>
+              {previewFeedTitle ? (
                 <Link className={styles.feedLink} to={`/${slug}`} viewTransition>
                   {previewFeedTitle}
                 </Link>
-              </div>
-            ) : (
-              <Skeleton width={90} height={10} />
-            )}
+              ) : (
+                <Skeleton width={90} height={10} />
+              )}
+              <Link
+                className={styles.reportLink}
+                to={`/report?feed=${slug}&episode=${episodeId}`}
+                viewTransition
+              >
+                Report a problem
+              </Link>
+            </div>
             {previewTitle ? (
               <h1 className={styles.title} style={{ viewTransitionName: `episode-title-${slug}-${episodeId}` }}>
                 {previewTitle}
