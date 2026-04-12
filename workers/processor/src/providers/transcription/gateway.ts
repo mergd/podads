@@ -1,4 +1,5 @@
 import type { EpisodeRecord, TranscriptResult, TranscriptSegment } from "../../lib/types";
+import { RetryableProcessingError } from "../../lib/retryable";
 
 interface GatewaySegment {
   id: number;
@@ -37,7 +38,37 @@ function toSegments(raw: GatewaySegment[]): TranscriptSegment[] {
 
 const GATEWAY_TIMEOUT_MS = 290_000;
 const MAX_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504, 524]);
+
+function parseRetryAfterSeconds(headerValue: string | null, body: string): number | undefined {
+  if (headerValue) {
+    const numeric = Number.parseInt(headerValue, 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+
+    const dateMs = Date.parse(headerValue);
+    if (Number.isFinite(dateMs)) {
+      const delaySeconds = Math.ceil((dateMs - Date.now()) / 1000);
+      if (delaySeconds > 0) {
+        return delaySeconds;
+      }
+    }
+  }
+
+  const durationMatch = body.match(/try again in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i);
+  if (!durationMatch) {
+    return undefined;
+  }
+
+  const hours = Number.parseInt(durationMatch[1] ?? "0", 10) || 0;
+  const minutes = Number.parseInt(durationMatch[2] ?? "0", 10) || 0;
+  const seconds = Number.parseInt(durationMatch[3] ?? "0", 10) || 0;
+  const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+
+  return totalSeconds > 0 ? totalSeconds : undefined;
+}
 
 async function fetchGateway(
   url: string,
@@ -64,20 +95,38 @@ async function fetchGateway(
 
       const text = await response.text();
 
+      if (response.status === 429) {
+        throw new RetryableProcessingError(
+          `Transcription gateway failed (${response.status}): ${text}`,
+          parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_DELAY_SECONDS
+        );
+      }
+
       if (!RETRYABLE_STATUS_CODES.has(response.status)) {
         throw new Error(`Transcription gateway failed (${response.status}): ${text}`);
       }
 
-      lastError = new Error(`Transcription gateway failed (${response.status}): ${text}`);
+      lastError = new RetryableProcessingError(
+        `Transcription gateway failed (${response.status}): ${text}`,
+        DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
+      );
     } catch (error) {
+      if (error instanceof RetryableProcessingError) {
+        throw error;
+      }
+
       if (error instanceof Error && error.message.includes("Transcription gateway failed")) {
         throw error;
       }
-      lastError = error instanceof Error ? error : new Error(String(error));
+
+      lastError = new RetryableProcessingError(
+        error instanceof Error ? error.message : String(error),
+        DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
+      );
     }
   }
 
-  throw lastError ?? new Error("Transcription gateway failed after retries");
+  throw lastError ?? new RetryableProcessingError("Transcription gateway failed after retries", DEFAULT_RETRY_DELAY_SECONDS);
 }
 
 export async function gatewayTranscription(env: Env, episode: EpisodeRecord): Promise<TranscriptResult> {

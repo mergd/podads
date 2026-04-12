@@ -1,6 +1,7 @@
 import { detectAdSpans } from "./adDetection";
 import { rewriteAudio } from "./audioRewrite";
 import { capturePostHogEvent } from "./posthog";
+import { getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
 import { generateTranscript } from "./transcription";
 import type { EpisodeJobMessage, EpisodeRecord } from "./types";
 
@@ -54,6 +55,31 @@ async function markJobFailed(db: D1Database, message: EpisodeJobMessage, errorMe
     .prepare(
       `UPDATE episodes
       SET processing_status = 'failed', last_error = ?2, updated_at = ?3
+      WHERE id = ?1`
+    )
+    .bind(message.episodeId, errorMessage, now)
+    .run();
+}
+
+async function markJobQueuedForRetry(
+  db: D1Database,
+  message: EpisodeJobMessage,
+  errorMessage: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE jobs
+      SET status = 'queued', last_error = ?2, updated_at = ?3
+      WHERE id = ?1`
+    )
+    .bind(message.jobId, errorMessage, now)
+    .run();
+
+  await db
+    .prepare(
+      `UPDATE episodes
+      SET processing_status = 'pending', last_error = ?2, updated_at = ?3
       WHERE id = ?1`
     )
     .bind(message.episodeId, errorMessage, now)
@@ -241,11 +267,35 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
   });
 }
 
-export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Promise<void> {
+export type EpisodeJobResult =
+  | { kind: "ack" }
+  | { kind: "retry"; delaySeconds: number };
+
+export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Promise<EpisodeJobResult> {
   try {
     await processEpisodeJob(env, message);
+    return { kind: "ack" };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown episode processing failure";
+
+    if (isRetryableProcessingError(error)) {
+      const delaySeconds = getRetryDelaySeconds(error, 60);
+
+      await markJobQueuedForRetry(env.DB, message, errorMessage);
+      await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_retry_scheduled", {
+        episode_id: message.episodeId,
+        feed_id: message.feedId,
+        error: errorMessage,
+        retry_delay_seconds: delaySeconds,
+        batch_window_seconds: message.batchWindowSeconds ?? null
+      });
+
+      return {
+        kind: "retry",
+        delaySeconds
+      };
+    }
+
     await markJobFailed(env.DB, message, errorMessage);
     await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_failed", {
       episode_id: message.episodeId,
@@ -253,6 +303,6 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
       error: errorMessage,
       batch_window_seconds: message.batchWindowSeconds ?? null
     });
-    throw error;
+    return { kind: "ack" };
   }
 }

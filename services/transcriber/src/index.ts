@@ -8,13 +8,24 @@ import { Readable } from "node:stream";
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 
-import { transcribeWithGroq, type TranscriptionResult } from "./groq.js";
+import { sendGroqCapacityAlert } from "./alerts.js";
+import {
+  createGroqKeyPool,
+  GroqRateLimitError,
+  parseGroqKeyConfigs,
+  transcribeWithGroq,
+  type TranscriptionResult
+} from "./groq.js";
 import { cleanupFile, speedUpAudio } from "./speedup.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
+const GROQ_API_KEYS = process.env.GROQ_API_KEYS ?? "";
 const GATEWAY_TOKEN = process.env.TRANSCRIPTION_GATEWAY_TOKEN ?? "";
 const SPEED_MULTIPLIER = Number(process.env.SPEED_MULTIPLIER) || 2;
+const DOWNLOAD_TIMEOUT_MS = 180_000;
+const groqKeys = parseGroqKeyConfigs(GROQ_API_KEYS, GROQ_API_KEY);
+const groqKeyPool = createGroqKeyPool(groqKeys);
 
 const app = Fastify({ logger: true, bodyLimit: 200 * 1024 * 1024 });
 await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } });
@@ -22,7 +33,8 @@ await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } });
 app.get("/health", async () => ({
   status: "ok",
   speed_multiplier: SPEED_MULTIPLIER,
-  groq_configured: GROQ_API_KEY.length > 0,
+  groq_configured: groqKeys.length > 0,
+  groq_key_count: groqKeys.length,
   gateway_auth_enabled: GATEWAY_TOKEN.length > 0,
 }));
 
@@ -35,7 +47,10 @@ function isAuthorized(authHeader: string | undefined): boolean {
 }
 
 async function downloadToTmp(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { "User-Agent": "PodAds/1.0" } });
+  const res = await fetch(url, {
+    headers: { "User-Agent": "PodAds/1.0" },
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
+  });
   if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
 
   const tmpPath = join(tmpdir(), `dl-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
@@ -89,15 +104,39 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     speedupMs = Date.now() - speedupStart;
     if (speedAudioPath !== rawAudioPath) filesToCleanup.push(speedAudioPath);
 
-    if (!GROQ_API_KEY) {
-      return reply.status(500).send({ error: "GROQ_API_KEY is not configured" });
+    if (groqKeyPool.size === 0) {
+      return reply.status(500).send({ error: "GROQ_API_KEY or GROQ_API_KEYS is not configured" });
     }
 
-    const result: TranscriptionResult = await transcribeWithGroq(
-      speedAudioPath,
-      GROQ_API_KEY,
-      SPEED_MULTIPLIER,
-    );
+    let result: TranscriptionResult;
+
+    try {
+      result = await transcribeWithGroq(
+        speedAudioPath,
+        groqKeyPool,
+        SPEED_MULTIPLIER,
+      );
+    } catch (error) {
+      if (error instanceof GroqRateLimitError) {
+        const retryAfterSeconds = error.retryAfterSeconds ?? 60;
+
+        if (error.scope === "all-keys") {
+          await sendGroqCapacityAlert({
+            keyCount: groqKeyPool.size,
+            retryAfterSeconds,
+            errorMessage: error.message
+          });
+        }
+
+        reply.header("Retry-After", String(retryAfterSeconds));
+        return reply.status(429).send({
+          error: error.message,
+          retry_after_seconds: retryAfterSeconds
+        });
+      }
+
+      throw error;
+    }
 
     const elapsed = (Date.now() - start) / 1000;
 

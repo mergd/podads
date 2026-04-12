@@ -1,15 +1,15 @@
-import { handleEpisodeJob } from "./lib/processEpisode";
+import { handleEpisodeJob, type EpisodeJobResult } from "./lib/processEpisode";
+import { recoverStaleEpisodeJobs } from "./lib/staleJobs";
 import type { EpisodeJobMessage } from "./lib/types";
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled queue message type: ${value}`);
 }
 
-async function dispatchMessage(env: Env, message: EpisodeJobMessage): Promise<void> {
+async function dispatchMessage(env: Env, message: EpisodeJobMessage): Promise<EpisodeJobResult> {
   switch (message.type) {
     case "episode.process":
-      await handleEpisodeJob(env, message);
-      return;
+      return handleEpisodeJob(env, message);
     default:
       assertNever(message.type);
   }
@@ -23,11 +23,25 @@ export default {
   async queue(batch: MessageBatch<EpisodeJobMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await dispatchMessage(env, message.body as EpisodeJobMessage);
-        message.ack();
+        const result = await dispatchMessage(env, message.body as EpisodeJobMessage);
+
+        switch (result.kind) {
+          case "ack":
+            message.ack();
+            break;
+          case "retry":
+            message.retry({ delaySeconds: result.delaySeconds });
+            break;
+          default:
+            assertNever(result);
+        }
       } catch (error) {
         message.retry();
       }
     }
+  },
+
+  async scheduled(_event, env): Promise<void> {
+    await recoverStaleEpisodeJobs(env);
   }
 } satisfies ExportedHandler<Env, EpisodeJobMessage>;

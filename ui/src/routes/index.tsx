@@ -70,12 +70,22 @@ export function HomePage() {
   return (
     <div className={styles.page}>
       <section className={styles.hero}>
-        <h1 className={styles.headline}>
-          Same show, fewer ads.
-        </h1>
-        <p className={styles.sub}>
-          Paste any podcast RSS feed and get a clean proxy — ads detected and stripped automatically.
-        </p>
+        {isLoading ? (
+          <div className={styles.heroSkeleton} aria-hidden>
+            <Skeleton width="min(22rem, 88%)" height={42} className={styles.heroHeadlineSkeleton} />
+            <Skeleton width="min(34rem, 100%)" height={16} />
+            <Skeleton width="min(29rem, 84%)" height={16} />
+          </div>
+        ) : (
+          <>
+            <h1 className={styles.headline}>
+              Same show, fewer ads.
+            </h1>
+            <p className={styles.sub}>
+              Paste any podcast RSS feed and get a clean proxy — ads detected and stripped automatically.
+            </p>
+          </>
+        )}
         <FeedForm
           errorMessage={errorMessage}
           isSubmitting={isSubmitting}
