@@ -74,14 +74,14 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
     setIsSeeking(false);
   }, []);
 
-  const handleCycleRate = useCallback(() => {
+  const handleRateChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const audio = audioRef.current;
     if (!audio) return;
-    const idx = PLAYBACK_RATES.indexOf(rate as (typeof PLAYBACK_RATES)[number]);
-    const next = PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length];
+    const next = Number(e.target.value);
+    if (!Number.isFinite(next)) return;
     audio.playbackRate = next;
     setRate(next);
-  }, [rate]);
+  }, []);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -174,15 +174,21 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
           {duration > 0 ? ` / ${formatTime(duration)}` : ""}
         </span>
 
-        <button
-          aria-label={`Playback speed ${formatRate(rate)}`}
-          className={styles.rateButton}
-          data-active={rate !== 1}
-          onClick={handleCycleRate}
-          type="button"
-        >
-          {formatRate(rate)}
-        </button>
+        <label className={styles.rateField}>
+          <span className={styles.rateLabel}>Speed</span>
+          <select
+            aria-label="Playback speed"
+            className={styles.rateSelect}
+            onChange={handleRateChange}
+            value={String(rate)}
+          >
+            {PLAYBACK_RATES.map((playbackRate) => (
+              <option key={playbackRate} value={playbackRate}>
+                {formatRate(playbackRate)}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <audio ref={audioRef} preload="none">
