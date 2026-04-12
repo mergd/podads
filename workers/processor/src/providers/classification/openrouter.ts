@@ -6,6 +6,7 @@ const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
 
 export interface AdClassificationPromptOptions {
   mentionPrerolls?: boolean;
+  maxSpanDurationMs?: number;
 }
 
 interface OpenRouterClassificationPayload {
@@ -21,6 +22,9 @@ export function buildAdClassificationPrompt(
   transcript: TranscriptResult,
   options: AdClassificationPromptOptions = {}
 ): string {
+  const maxSpanDurationMinutes = options.maxSpanDurationMs
+    ? Math.round(options.maxSpanDurationMs / 60_000)
+    : null;
   const segments = transcript.segments.map((segment) => ({
     startMs: segment.startMs,
     endMs: segment.endMs,
@@ -41,6 +45,12 @@ export function buildAdClassificationPrompt(
     "When an ad pod is concentrated in one block, prefer the net start and net end of the whole promotional block rather than splitting it into evenly spaced micro-spans.",
     "Include adjacent ad copy that belongs to the same spot, such as sponsor tags, legal disclaimers, pricing details, URLs, promo codes, and short bridge lines that are still part of the paid read.",
     "Ad pods often land near round durations such as about 30s, 60s, 90s, 120s, or 180s. Use that only as a weak prior when the transcript supports it, not as a hard rule.",
+    ...(maxSpanDurationMinutes === null
+      ? []
+      : [
+          `No single returned span may exceed ${maxSpanDurationMinutes} minutes.`,
+          `Sanity check: if a suspected ad block appears to run longer than ${maxSpanDurationMinutes} minutes, narrow the span to the most clearly promotional section instead of returning the entire block.`
+        ]),
     "Confidence must be between 0 and 1.",
     "Prefer fewer high-confidence spans over many weak guesses.",
     ...prerollInstructions,
@@ -133,9 +143,11 @@ export async function runOpenRouterClassificationModel(
 
 export async function openRouterClassification(
   env: Env,
-  transcript: TranscriptResult
+  transcript: TranscriptResult,
+  options: AdClassificationPromptOptions = {}
 ): Promise<AdDetectionResult> {
   return runOpenRouterClassificationModel(env, OPENROUTER_CLASSIFICATION_MODEL, transcript, {
-    mentionPrerolls: true
+    mentionPrerolls: true,
+    ...options
   });
 }

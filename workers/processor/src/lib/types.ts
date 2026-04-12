@@ -31,6 +31,12 @@ export interface AdSpan {
   reason: string;
 }
 
+export interface AdDetectionContext {
+  episodeTitle?: string | null;
+  feedTitle?: string | null;
+  feedSlug?: string | null;
+}
+
 export interface TimeRange {
   startMs: number;
   endMs: number;
@@ -70,6 +76,8 @@ export interface EpisodeRecord {
   id: number;
   feed_id: number;
   title: string | null;
+  feed_title?: string | null;
+  feed_slug?: string | null;
   source_enclosure_url: string;
   source_enclosure_type: string | null;
   processing_status: "pending" | "processing" | "ready" | "failed";

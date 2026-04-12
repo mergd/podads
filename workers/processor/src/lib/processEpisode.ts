@@ -187,9 +187,19 @@ async function updateEpisodeProcessingDetails(
 async function loadEpisode(db: D1Database, episodeId: number): Promise<EpisodeRecord | null> {
   const episode = await db
     .prepare(
-      `SELECT id, feed_id, title, source_enclosure_url, source_enclosure_type, processing_status, processing_details_json
+      `SELECT
+        episodes.id,
+        episodes.feed_id,
+        episodes.title,
+        feeds.title AS feed_title,
+        feeds.slug AS feed_slug,
+        episodes.source_enclosure_url,
+        episodes.source_enclosure_type,
+        episodes.processing_status,
+        episodes.processing_details_json
       FROM episodes
-      WHERE id = ?1
+      INNER JOIN feeds ON feeds.id = episodes.feed_id
+      WHERE episodes.id = ?1
       LIMIT 1`
     )
     .bind(episodeId)
@@ -380,7 +390,11 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     await updateEpisodeProcessingDetails(env.DB, message.episodeId, processingDetails, detectingAdsAt);
   }
 
-  const detection = await detectAdSpans(env, transcript);
+  const detection = await detectAdSpans(env, transcript, {
+    episodeTitle: episode.title,
+    feedTitle: episode.feed_title ?? null,
+    feedSlug: episode.feed_slug ?? null
+  });
   const detectedDurationMs = mergeSpanDurations(detection.spans);
   const detectedOpeningDurationMs = mergeSpanDurations(
     detection.spans.map((span) => ({

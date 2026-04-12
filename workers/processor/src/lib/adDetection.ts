@@ -3,9 +3,17 @@ import {
   OPENROUTER_CLASSIFICATION_MODEL,
   openRouterClassification
 } from "../providers/classification/openrouter";
-import type { AdDetectionResult, AdSpan, TranscriptResult, TranscriptSegment } from "./types";
+import type {
+  AdDetectionContext,
+  AdDetectionResult,
+  AdSpan,
+  TranscriptResult,
+  TranscriptSegment
+} from "./types";
 
 type ClassificationProvider = "mock" | "openrouter";
+const DEFAULT_AD_SPAN_MAX_DURATION_MS = 6 * 60 * 1000;
+const LEX_FRIDMAN_AD_SPAN_MAX_DURATION_MS = 12 * 60 * 1000;
 const SNAP_WINDOW_MS = 5_000;
 const SEGMENT_EXPANSION_GAP_MS = 2_500;
 const MAX_EDGE_EXPANSION_SEGMENTS = 3;
@@ -69,6 +77,22 @@ function snapToNearestGap(target: number, transcript: TranscriptResult, mode: "s
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function isLexFridmanFeed(context: AdDetectionContext): boolean {
+  const haystack = [context.feedTitle, context.feedSlug]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" ")
+    .replace(/[-_]+/g, " ")
+    .toLowerCase();
+
+  return haystack.includes("lex fridman");
+}
+
+function getAdSpanMaxDurationMs(context: AdDetectionContext): number {
+  return isLexFridmanFeed(context)
+    ? LEX_FRIDMAN_AD_SPAN_MAX_DURATION_MS
+    : DEFAULT_AD_SPAN_MAX_DURATION_MS;
 }
 
 function isPromotionalSegment(text: string): boolean {
@@ -203,8 +227,33 @@ function refineSpanBoundaries(spans: AdSpan[], transcript: TranscriptResult): Ad
   return mergeSpans(expandedSpans);
 }
 
-export async function detectAdSpans(env: Env, transcript: TranscriptResult): Promise<AdDetectionResult> {
+function capSpanDurations(spans: AdSpan[], maxDurationMs: number): AdSpan[] {
+  return spans
+    .map((span) => {
+      const cappedEndMs = Math.min(span.endMs, span.startMs + maxDurationMs);
+
+      if (cappedEndMs <= span.startMs) {
+        return null;
+      }
+
+      return cappedEndMs === span.endMs
+        ? span
+        : {
+            ...span,
+            endMs: cappedEndMs,
+            reason: `${span.reason} | capped_to_max_duration`
+          };
+    })
+    .filter((span): span is AdSpan => span !== null);
+}
+
+export async function detectAdSpans(
+  env: Env,
+  transcript: TranscriptResult,
+  context: AdDetectionContext = {}
+): Promise<AdDetectionResult> {
   const provider = env.CLASSIFICATION_PROVIDER as ClassificationProvider;
+  const maxSpanDurationMs = getAdSpanMaxDurationMs(context);
   let result: AdDetectionResult;
 
   switch (provider) {
@@ -212,7 +261,10 @@ export async function detectAdSpans(env: Env, transcript: TranscriptResult): Pro
       result = await mockClassification(OPENROUTER_CLASSIFICATION_MODEL, transcript.segments);
       break;
     case "openrouter":
-      result = await openRouterClassification(env, transcript);
+      result = await openRouterClassification(env, transcript, {
+        mentionPrerolls: true,
+        maxSpanDurationMs
+      });
       break;
     default:
       result = assertNever(provider);
@@ -221,6 +273,6 @@ export async function detectAdSpans(env: Env, transcript: TranscriptResult): Pro
 
   return {
     ...result,
-    spans: refineSpanBoundaries(result.spans, transcript)
+    spans: capSpanDurations(refineSpanBoundaries(result.spans, transcript), maxSpanDurationMs)
   };
 }
