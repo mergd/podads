@@ -14,6 +14,12 @@ export interface EpisodeProcessingPreviewSegment {
   text: string;
 }
 
+export interface EpisodeTranscriptSegment {
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
 export interface EpisodeProcessingDiagnostics {
   transcriptSegmentCount: number | null;
   transcriptAnalysisWindowMs: number | null;
@@ -79,6 +85,17 @@ export interface FeedDetailResponse {
   feed: FeedSummary;
   episodes: EpisodeSummary[];
   proxiedFeedUrl: string;
+}
+
+export interface EpisodeTranscriptResponse {
+  episodeId: number;
+  feedSlug: string;
+  provider: string;
+  model: string;
+  text: string;
+  analysisTruncated: boolean;
+  analyzedDurationMs: number;
+  segments: EpisodeTranscriptSegment[];
 }
 
 export interface RegisterFeedRequest {

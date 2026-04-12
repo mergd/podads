@@ -4,12 +4,12 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { HtmlContent } from "../components/HtmlContent";
 import { InlineAudioPlayer } from "../components/InlineAudioPlayer";
 import { Skeleton } from "../components/Skeleton";
-import { fetchFeed } from "../lib/api";
+import { fetchEpisodeTranscript, fetchFeed } from "../lib/api";
 import { formatEpisodeDuration, isNewContent, shortDate } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import { captureUiEvent } from "../lib/posthog";
 import { getEpisodeAudioStateCopy, getEpisodeStatusLabel, getEpisodeTimeSavedLabel } from "../lib/processing";
-import type { EpisodeSummary, FeedDetailResponse } from "@podads/shared/api";
+import type { EpisodeSummary, EpisodeTranscriptResponse, FeedDetailResponse } from "@podads/shared/api";
 import styles from "./episode.module.css";
 
 interface EpisodeLinkState {
@@ -22,11 +22,28 @@ function findEpisodeById(episodes: EpisodeSummary[], episodeId: number): Episode
   return episodes.find((episode) => episode.id === episodeId) ?? null;
 }
 
+function formatTranscriptTimestamp(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 export function EpisodePage() {
   const { slug = "", episodeId = "" } = useParams();
   const { state } = useLocation() as { state: EpisodeLinkState | null };
   const [detail, setDetail] = useState<FeedDetailResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isTranscriptVisible, setIsTranscriptVisible] = useState(false);
+  const [isTranscriptLoading, setIsTranscriptLoading] = useState(false);
+  const [transcript, setTranscript] = useState<EpisodeTranscriptResponse | null>(null);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
 
   const parsedEpisodeId = Number.parseInt(episodeId, 10);
   const episode = useMemo(
@@ -34,6 +51,13 @@ export function EpisodePage() {
     [detail, parsedEpisodeId]
   );
   const hasAdFreeAudio = Boolean(episode?.cleanedEnclosureUrl);
+
+  useEffect(() => {
+    setIsTranscriptVisible(false);
+    setIsTranscriptLoading(false);
+    setTranscript(null);
+    setTranscriptError(null);
+  }, [parsedEpisodeId, slug]);
 
   useEffect(() => {
     let active = true;
@@ -76,6 +100,43 @@ export function EpisodePage() {
       active = false;
     };
   }, [parsedEpisodeId, slug]);
+
+  useEffect(() => {
+    if (!isTranscriptVisible || transcript || !slug || !Number.isFinite(parsedEpisodeId)) {
+      return;
+    }
+
+    let active = true;
+    setIsTranscriptLoading(true);
+
+    async function loadTranscript() {
+      try {
+        const nextTranscript = await fetchEpisodeTranscript(slug, parsedEpisodeId);
+        if (!active) {
+          return;
+        }
+
+        setTranscript(nextTranscript);
+        setTranscriptError(null);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setTranscriptError(error instanceof Error ? error.message : "Could not load the transcript.");
+      } finally {
+        if (active) {
+          setIsTranscriptLoading(false);
+        }
+      }
+    }
+
+    void loadTranscript();
+
+    return () => {
+      active = false;
+    };
+  }, [isTranscriptVisible, parsedEpisodeId, slug, transcript, transcriptError]);
 
   if (errorMessage) {
     return (
@@ -237,6 +298,68 @@ export function EpisodePage() {
               </a>
             ) : null}
           </div>
+
+          <section className={styles.transcriptSection}>
+            <div className={styles.transcriptHeader}>
+              <div className={styles.transcriptIntro}>
+                <h2 className={styles.transcriptTitle}>Transcript</h2>
+                <p className={styles.transcriptSubtitle}>
+                  Inspect the exact transcript and timestamps behind the ad cuts.
+                </p>
+              </div>
+              <button
+                className={styles.transcriptToggle}
+                onClick={() => {
+                  setIsTranscriptVisible((current) => {
+                    const next = !current;
+                    if (next) {
+                      setTranscriptError(null);
+                    }
+                    return next;
+                  });
+                }}
+                type="button"
+              >
+                {isTranscriptVisible ? "Hide transcript" : "Show transcript"}
+              </button>
+            </div>
+
+            {isTranscriptVisible ? (
+              <div className={styles.transcriptBody}>
+                {isTranscriptLoading ? (
+                  <div className={styles.transcriptLoading}>
+                    <Skeleton width="100%" height={16} />
+                    <Skeleton width="94%" height={16} />
+                    <Skeleton width="88%" height={16} />
+                    <Skeleton width="91%" height={16} />
+                  </div>
+                ) : transcriptError ? (
+                  <div className={styles.transcriptEmpty}>{transcriptError}</div>
+                ) : transcript ? (
+                  <>
+                    <div className={styles.transcriptMeta}>
+                      <span>{transcript.segments.length} segments</span>
+                      <span>{formatTranscriptTimestamp(transcript.analyzedDurationMs)} analyzed</span>
+                      <span>{transcript.provider}</span>
+                    </div>
+                    <div className={styles.transcriptList}>
+                      {transcript.segments.map((segment) => (
+                        <div
+                          className={styles.transcriptRow}
+                          key={`${segment.startMs}-${segment.endMs}-${segment.text.slice(0, 24)}`}
+                        >
+                          <span className={styles.transcriptTime}>{formatTranscriptTimestamp(segment.startMs)}</span>
+                          <p className={styles.transcriptText}>{segment.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className={styles.transcriptEmpty}>Transcript unavailable.</div>
+                )}
+              </div>
+            ) : null}
+          </section>
         </div>
       </section>
     </div>

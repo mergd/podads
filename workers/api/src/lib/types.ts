@@ -10,6 +10,8 @@ export type {
   ComplaintRequest,
   EpisodeProcessingDiagnostics,
   EpisodeProcessingPreviewSegment,
+  EpisodeTranscriptResponse,
+  EpisodeTranscriptSegment,
   FeedLookupResponse,
   FeedPreviewEpisode,
   FeedPreviewResponse,

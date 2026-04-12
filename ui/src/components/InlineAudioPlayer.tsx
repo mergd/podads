@@ -6,6 +6,7 @@ import styles from "./InlineAudioPlayer.module.css";
 type PlaybackState = "idle" | "loading" | "playing" | "paused";
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const;
+const SKIP_SECONDS = 15;
 
 interface InlineAudioPlayerProps {
   buttonText?: string;
@@ -31,11 +32,11 @@ function formatRate(rate: number): string {
 
 export function InlineAudioPlayer({ buttonText, className, label, src, type }: InlineAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const seekingRef = useRef(false);
   const [state, setState] = useState<PlaybackState>("idle");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
-  const [isSeeking, setIsSeeking] = useState(false);
 
   const handleToggle = useCallback(() => {
     const audio = audioRef.current;
@@ -58,30 +59,38 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
     }
   }, [state]);
 
+  const handleSkip = useCallback((delta: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.min(Math.max(0, audio.currentTime + delta), audio.duration || Infinity);
+    setCurrentTime(audio.currentTime);
+  }, []);
+
   const handleSeekStart = useCallback(() => {
-    setIsSeeking(true);
+    seekingRef.current = true;
   }, []);
 
   const handleSeekInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
+    seekingRef.current = true;
     setCurrentTime(Number(e.currentTarget.value));
   }, []);
 
-  const handleSeekEnd = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSeekCommit = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = Number(e.target.value);
     }
-    setIsSeeking(false);
+    seekingRef.current = false;
   }, []);
 
-  const handleRateChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleCycleRate = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const next = Number(e.target.value);
-    if (!Number.isFinite(next)) return;
+    const idx = PLAYBACK_RATES.indexOf(rate as (typeof PLAYBACK_RATES)[number]);
+    const next = PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length];
     audio.playbackRate = next;
     setRate(next);
-  }, []);
+  }, [rate]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -92,7 +101,7 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
     function onWaiting() { setState("loading"); }
     function onPlaying() { setState("playing"); }
     function onTimeUpdate() {
-      if (!isSeeking) setCurrentTime(audio!.currentTime);
+      if (!seekingRef.current) setCurrentTime(audio!.currentTime);
     }
     function onLoadedMetadata() { setDuration(audio!.duration); }
     function onEnded() { setState("paused"); }
@@ -114,7 +123,7 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
       audio.removeEventListener("ended", onEnded);
     };
-  }, [isSeeking]);
+  }, []);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const isActive = state !== "idle";
@@ -137,29 +146,51 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
   return (
     <div className={rootClassName}>
       <div className={styles.player}>
-        <button
-          aria-label={state === "playing" ? "Pause" : "Play"}
-          className={styles.playPause}
-          onClick={handleToggle}
-          type="button"
-        >
-          {state === "loading" ? (
-            <Spinner className={styles.spinner} size={16} />
-          ) : state === "playing" ? (
-            <Pause weight="fill" size={16} />
-          ) : (
-            <Play weight="fill" size={16} />
-          )}
-        </button>
+        <div className={styles.controls}>
+          <button
+            aria-label="Skip back 15 seconds"
+            className={styles.skipButton}
+            onClick={() => handleSkip(-SKIP_SECONDS)}
+            type="button"
+          >
+            −{SKIP_SECONDS}
+          </button>
 
-        <div className={styles.track}>
-          <div className={styles.trackFill} style={{ width: `${progress}%` }} />
+          <button
+            aria-label={state === "playing" ? "Pause" : "Play"}
+            className={styles.playPause}
+            onClick={handleToggle}
+            type="button"
+          >
+            {state === "loading" ? (
+              <Spinner className={styles.spinner} size={16} />
+            ) : state === "playing" ? (
+              <Pause weight="fill" size={16} />
+            ) : (
+              <Play weight="fill" size={16} />
+            )}
+          </button>
+
+          <button
+            aria-label="Skip forward 15 seconds"
+            className={styles.skipButton}
+            onClick={() => handleSkip(SKIP_SECONDS)}
+            type="button"
+          >
+            +{SKIP_SECONDS}
+          </button>
+        </div>
+
+        <div className={styles.trackWrap}>
+          <div className={styles.track}>
+            <div className={styles.trackFill} style={{ width: `${progress}%` }} />
+          </div>
           <input
             aria-label="Seek"
             className={styles.seekInput}
             max={duration || 0}
             min={0}
-            onChange={handleSeekEnd}
+            onChange={handleSeekCommit}
             onInput={handleSeekInput}
             onMouseDown={handleSeekStart}
             onTouchStart={handleSeekStart}
@@ -174,21 +205,15 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
           {duration > 0 ? ` / ${formatTime(duration)}` : ""}
         </span>
 
-        <label className={styles.rateField}>
-          <span className={styles.rateLabel}>Speed</span>
-          <select
-            aria-label="Playback speed"
-            className={styles.rateSelect}
-            onChange={handleRateChange}
-            value={String(rate)}
-          >
-            {PLAYBACK_RATES.map((playbackRate) => (
-              <option key={playbackRate} value={playbackRate}>
-                {formatRate(playbackRate)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <button
+          aria-label={`Playback speed ${formatRate(rate)}`}
+          className={styles.rateButton}
+          data-active={rate !== 1}
+          onClick={handleCycleRate}
+          type="button"
+        >
+          {formatRate(rate)}
+        </button>
       </div>
 
       <audio ref={audioRef} preload="none">

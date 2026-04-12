@@ -5,7 +5,7 @@ import { rewriteAudio } from "./audioRewrite";
 import { capturePostHogEvent } from "./posthog";
 import { getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
 import { generateTranscript } from "./transcription";
-import type { AudioRewriteManifest, EpisodeJobMessage, EpisodeRecord, TranscriptResult } from "./types";
+import type { AdSpan, AudioRewriteManifest, EpisodeJobMessage, EpisodeRecord, TranscriptResult } from "./types";
 
 type ProcessingDetails = Record<string, unknown>;
 type PreviewSegment = {
@@ -80,6 +80,39 @@ function buildRewriteDiagnostics(manifest: AudioRewriteManifest, removedDuration
     removedDurationMs,
     rewriteNotes: manifest.notes
   };
+}
+
+function mergeSpanDurations(spans: AdSpan[]): number {
+  if (spans.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...spans].sort((left, right) => left.startMs - right.startMs);
+  let totalMs = 0;
+  let currentStartMs = sorted[0]?.startMs ?? 0;
+  let currentEndMs = sorted[0]?.endMs ?? 0;
+
+  for (const span of sorted.slice(1)) {
+    if (span.startMs <= currentEndMs) {
+      currentEndMs = Math.max(currentEndMs, span.endMs);
+      continue;
+    }
+
+    totalMs += currentEndMs - currentStartMs;
+    currentStartMs = span.startMs;
+    currentEndMs = span.endMs;
+  }
+
+  totalMs += currentEndMs - currentStartMs;
+  return totalMs;
+}
+
+function safeRatio(numerator: number | null, denominator: number | null): number | null {
+  if (numerator === null || denominator === null || denominator <= 0) {
+    return null;
+  }
+
+  return numerator / denominator;
 }
 
 function logEpisodeProcessingDiagnostics(
@@ -348,6 +381,13 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
   }
 
   const detection = await detectAdSpans(env, transcript);
+  const detectedDurationMs = mergeSpanDurations(detection.spans);
+  const detectedOpeningDurationMs = mergeSpanDurations(
+    detection.spans.map((span) => ({
+      ...span,
+      endMs: Math.min(span.endMs, OPENING_SIGNAL_WINDOW_MS)
+    })).filter((span) => span.endMs > span.startMs)
+  );
   const detectionDiagnostics = buildDetectionDiagnostics(transcript, detection.spans);
   logEpisodeProcessingDiagnostics("info", "episode_ad_detection_diagnostics", episode.id, episode.feed_id, {
     classificationProvider: detection.provider,
@@ -367,6 +407,10 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     model: detection.model,
     estimated_cost_usd: detection.estimatedCostUsd,
     ad_span_count: detection.spans.length,
+    detected_duration_ms: detectedDurationMs,
+    detected_opening_duration_ms: detectedOpeningDurationMs,
+    detected_ratio_of_analyzed_audio: safeRatio(detectedDurationMs, transcript.analyzedDurationMs),
+    detected_opening_ratio_of_analyzed_audio: safeRatio(detectedOpeningDurationMs, transcript.analyzedDurationMs),
     request_duration_ms: detection.requestDurationMs,
     prompt_tokens: detection.promptTokens,
     completion_tokens: detection.completionTokens,
@@ -432,6 +476,8 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     audioOutput.manifest.sourceDurationMs !== null && audioOutput.manifest.cleanedDurationMs !== null
       ? audioOutput.manifest.sourceDurationMs - audioOutput.manifest.cleanedDurationMs
       : null;
+  const removedRatioOfSource = safeRatio(removedDurationMs, audioOutput.manifest.sourceDurationMs);
+  const removedRatioOfAnalyzedAudio = safeRatio(removedDurationMs, transcript.analyzedDurationMs);
   const rewriteDiagnostics = buildRewriteDiagnostics(audioOutput.manifest, removedDurationMs);
   logEpisodeProcessingDiagnostics("info", "episode_audio_rewrite_diagnostics", episode.id, episode.feed_id, rewriteDiagnostics);
   const completedAt = new Date().toISOString();
@@ -483,8 +529,14 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     bytes_written: audioOutput.bytesWritten,
     total_estimated_cost_usd: totalEstimatedCost,
     ad_span_count: detection.spans.length,
+    detected_duration_ms: detectedDurationMs,
+    detected_opening_duration_ms: detectedOpeningDurationMs,
     audio_rewrite_mode: audioOutput.manifest.mode,
+    source_duration_ms: audioOutput.manifest.sourceDurationMs,
+    cleaned_duration_ms: audioOutput.manifest.cleanedDurationMs,
     removed_duration_ms: removedDurationMs,
+    removed_ratio_of_source: removedRatioOfSource,
+    removed_ratio_of_analyzed_audio: removedRatioOfAnalyzedAudio,
     queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
     transcript_provider_queue_delay_ms: transcript.providerQueueDelayMs ?? null,
     transcript_provider_execution_ms: transcript.providerExecutionMs ?? null,

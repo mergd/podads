@@ -843,6 +843,33 @@ export async function getEpisodeAudioSource(
   };
 }
 
+export async function getEpisodeTranscriptMetadata(
+  db: D1Database,
+  slug: string,
+  episodeId: number
+): Promise<{ transcriptKey: string; episodeId: number; feedSlug: string } | null> {
+  const episode = await db
+    .prepare(
+      `SELECT episodes.id, episodes.transcript_key, feeds.slug AS feed_slug
+      FROM episodes
+      INNER JOIN feeds ON feeds.id = episodes.feed_id
+      WHERE feeds.slug = ?1 AND episodes.id = ?2
+      LIMIT 1`
+    )
+    .bind(slug, episodeId)
+    .first<{ id: number; transcript_key: string | null; feed_slug: string }>();
+
+  if (!episode?.transcript_key) {
+    return null;
+  }
+
+  return {
+    transcriptKey: episode.transcript_key,
+    episodeId: episode.id,
+    feedSlug: episode.feed_slug
+  };
+}
+
 export async function getEpisodeById(
   db: D1Database,
   episodeId: number

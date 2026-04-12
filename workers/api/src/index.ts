@@ -1,4 +1,10 @@
-import type { ComplaintRequest, FeedLookupResponse, FeedPreviewResponse, RegisterFeedRequest } from "@podads/shared/api";
+import type {
+  ComplaintRequest,
+  EpisodeTranscriptResponse,
+  FeedLookupResponse,
+  FeedPreviewResponse,
+  RegisterFeedRequest
+} from "@podads/shared/api";
 import type { EpisodeQueueMessage } from "@podads/shared/queue";
 
 import { runScheduledRefresh } from "./cron";
@@ -8,6 +14,7 @@ import {
   formatRegisterResponse,
   getEpisodeAudioSource,
   getEpisodeById,
+  getEpisodeTranscriptMetadata,
   getFeedBySourceUrl,
   getFeedBySlug,
   getFeedDetail,
@@ -299,6 +306,60 @@ async function handleAudio(request: Request, env: Env, slug: string, episodeId: 
   );
 }
 
+async function handleEpisodeTranscript(env: Env, slug: string, episodeId: number): Promise<Response> {
+  const metadata = await getEpisodeTranscriptMetadata(env.DB, slug, episodeId);
+
+  if (!metadata) {
+    return notFound();
+  }
+
+  const object = await env.AUDIO_BUCKET.get(metadata.transcriptKey);
+
+  if (!object) {
+    return notFound();
+  }
+
+  const transcript = (await object.json()) as {
+    provider?: string;
+    model?: string;
+    text?: string;
+    analysisTruncated?: boolean;
+    analyzedDurationMs?: number;
+    segments?: Array<{ startMs?: number; endMs?: number; text?: string }>;
+  };
+
+  const response: EpisodeTranscriptResponse = {
+    episodeId: metadata.episodeId,
+    feedSlug: metadata.feedSlug,
+    provider: transcript.provider ?? "unknown",
+    model: transcript.model ?? "unknown",
+    text: transcript.text ?? "",
+    analysisTruncated: Boolean(transcript.analysisTruncated),
+    analyzedDurationMs: typeof transcript.analyzedDurationMs === "number" ? transcript.analyzedDurationMs : 0,
+    segments: Array.isArray(transcript.segments)
+      ? transcript.segments.flatMap((segment) => {
+          if (
+            typeof segment?.startMs !== "number" ||
+            typeof segment.endMs !== "number" ||
+            typeof segment.text !== "string"
+          ) {
+            return [];
+          }
+
+          return [
+            {
+              startMs: segment.startMs,
+              endMs: segment.endMs,
+              text: segment.text
+            }
+          ];
+        })
+      : []
+  };
+
+  return json(response);
+}
+
 function unauthorized(): Response {
   return json({ error: "Unauthorized" }, 401);
 }
@@ -382,6 +443,19 @@ function parseFeedSlug(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
+function parseTranscriptRoute(pathname: string): { slug: string; episodeId: number } | null {
+  const match = pathname.match(/^\/api\/feeds\/([^/]+)\/episodes\/(\d+)\/transcript$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    slug: match[1] ?? "",
+    episodeId: Number(match[2] ?? "0")
+  };
+}
+
 function parseRssSlug(pathname: string): string | null {
   const match = pathname.match(/^\/feeds\/([^/]+)\.xml$/);
   return match?.[1] ?? null;
@@ -444,6 +518,11 @@ export default {
     }
 
     if (request.method === "GET") {
+      const transcriptRoute = parseTranscriptRoute(url.pathname);
+      if (transcriptRoute) {
+        return handleEpisodeTranscript(env, transcriptRoute.slug, transcriptRoute.episodeId);
+      }
+
       const feedSlug = parseFeedSlug(url.pathname);
       if (feedSlug) {
         return handleFeedDetail(request, env, feedSlug);

@@ -1,5 +1,6 @@
 import type {
   ComplaintRequest,
+  EpisodeTranscriptResponse,
   FeedDetailResponse,
   FeedLookupResponse,
   FeedPreviewResponse,
@@ -35,6 +36,11 @@ export async function fetchFeeds(query?: string): Promise<FeedsListResponse> {
 export async function fetchFeed(slug: string): Promise<FeedDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/feeds/${slug}`);
   return parseJson<FeedDetailResponse>(response);
+}
+
+export async function fetchEpisodeTranscript(slug: string, episodeId: number): Promise<EpisodeTranscriptResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/feeds/${slug}/episodes/${episodeId}/transcript`);
+  return parseJson<EpisodeTranscriptResponse>(response);
 }
 
 export async function lookupFeed(url: string): Promise<FeedLookupResponse> {

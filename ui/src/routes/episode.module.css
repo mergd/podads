@@ -189,6 +189,118 @@
   background: var(--color-bg-inset);
 }
 
+.transcriptSection {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-elevated);
+}
+
+.transcriptHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.transcriptIntro {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.transcriptTitle {
+  margin: 0;
+  font-size: var(--text-body-lg);
+  letter-spacing: -0.02em;
+}
+
+.transcriptSubtitle {
+  margin: 0;
+  color: var(--color-text-soft);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.transcriptToggle {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.transcriptToggle:hover {
+  background: var(--color-bg-inset);
+}
+
+.transcriptBody {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.transcriptMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text-soft);
+  font-size: var(--text-xs);
+}
+
+.transcriptLoading {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.transcriptEmpty,
+.transcriptError {
+  margin: 0;
+  color: var(--color-text-soft);
+  font-size: var(--text-small);
+}
+
+.transcriptList {
+  display: grid;
+  gap: 1px;
+  max-height: min(42rem, 70vh);
+  overflow: auto;
+  padding: 1px;
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius-xl) - 4px);
+  background: var(--color-border);
+}
+
+.transcriptRow {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3);
+  background: var(--color-bg);
+}
+
+.transcriptTime {
+  color: var(--color-text-soft);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.transcriptText {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-small);
+  line-height: 1.55;
+}
+
 @media (max-width: 720px) {
   .hero {
     grid-template-columns: 1fr;
@@ -198,5 +310,10 @@
   .coverFallback {
     width: 5.5rem;
     height: 5.5rem;
+  }
+
+  .transcriptRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
   }
 }
