@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { FeedForm } from "../components/FeedForm";
 import { FeedGallery } from "../components/FeedGallery";
 import { LatestEpisodes } from "../components/LatestEpisodes";
+import { Skeleton } from "../components/Skeleton";
 import { fetchHome, registerFeed } from "../lib/api";
 import { captureUiEvent } from "../lib/posthog";
 import type { HomeResponse, RegisterFeedResponse } from "@podads/shared/api";
@@ -63,14 +64,61 @@ export function HomePage() {
 
   return (
     <div className={styles.page}>
-      <FeedForm errorMessage={errorMessage} isSubmitting={isSubmitting} result={result} onSubmit={handleSubmit} />
+      <section className={styles.hero}>
+        <h1 className={styles.headline}>
+          Same show, fewer ads.
+        </h1>
+        <p className={styles.sub}>
+          Paste any podcast RSS feed and get a clean proxy — ads detected and stripped automatically.
+        </p>
+        <FeedForm
+          errorMessage={errorMessage}
+          isSubmitting={isSubmitting}
+          onDraftChange={() => {
+            setErrorMessage(null);
+            setResult(null);
+          }}
+          onSubmit={handleSubmit}
+          result={result}
+        />
+      </section>
 
-      {isLoading ? <div>Loading homepage activity...</div> : null}
-
-      <div className={styles.grid}>
-        <LatestEpisodes episodes={home.latestEpisodes} />
-        <FeedGallery feeds={home.feeds} />
-      </div>
+      {isLoading ? (
+        <>
+          <section className={styles.skeletonSection}>
+            <Skeleton width={80} height={22} />
+            <div className={styles.skeletonGrid}>
+              {Array.from({ length: 6 }, (_, i) => (
+                <div className={styles.skeletonCard} key={i}>
+                  <Skeleton variant="rounded" width="100%" height={0} className={styles.skeletonArt} />
+                  <Skeleton width="80%" height={14} />
+                  <Skeleton width="50%" height={10} />
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className={styles.skeletonSection}>
+            <Skeleton width={120} height={22} />
+            <div className={styles.skeletonList}>
+              {Array.from({ length: 4 }, (_, i) => (
+                <div className={styles.skeletonRow} key={i}>
+                  <Skeleton variant="rounded" width="2.4rem" height="2.4rem" />
+                  <div className={styles.skeletonRowContent}>
+                    <Skeleton width="30%" height={10} />
+                    <Skeleton width="60%" height={14} />
+                    <Skeleton width="20%" height={10} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          {home.feeds.length > 0 && <FeedGallery feeds={home.feeds} />}
+          {home.latestEpisodes.length > 0 && <LatestEpisodes episodes={home.latestEpisodes} />}
+        </>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import type {
   EpisodeSummary,
   FeedDetailResponse,
   FeedRow,
+  FeedsListResponse,
   FeedSummary,
   HomeResponse,
   RegisterFeedResponse,
@@ -23,7 +24,123 @@ function parseJsonArray(value: string): string[] {
   }
 }
 
-function buildFeedSummary(row: FeedRow): FeedSummary {
+interface FeedRowWithStats extends FeedRow {
+  latest_episode_pub_date?: string | null;
+  episode_count?: number | string | null;
+}
+
+interface EpisodeDateStatRow {
+  feed_id: number;
+  pub_date: string | null;
+}
+
+function parseDateMs(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compareNumbersDesc(left: number | null, right: number | null): number {
+  if (left === null && right === null) {
+    return 0;
+  }
+
+  if (left === null) {
+    return 1;
+  }
+
+  if (right === null) {
+    return -1;
+  }
+
+  return right - left;
+}
+
+function sortEpisodeRows(
+  rows: Array<EpisodeRow & { feed_slug: string; feed_title: string | null }>
+): Array<EpisodeRow & { feed_slug: string; feed_title: string | null }> {
+  return [...rows].sort((left, right) => {
+    const pubDateComparison = compareNumbersDesc(parseDateMs(left.pub_date), parseDateMs(right.pub_date));
+    if (pubDateComparison !== 0) {
+      return pubDateComparison;
+    }
+
+    const processedAtComparison = compareNumbersDesc(
+      parseDateMs(left.last_processed_at),
+      parseDateMs(right.last_processed_at)
+    );
+    if (processedAtComparison !== 0) {
+      return processedAtComparison;
+    }
+
+    const updatedAtComparison = compareNumbersDesc(parseDateMs(left.updated_at), parseDateMs(right.updated_at));
+    if (updatedAtComparison !== 0) {
+      return updatedAtComparison;
+    }
+
+    return right.id - left.id;
+  });
+}
+
+function sortFeedRows(rows: FeedRowWithStats[]): FeedRowWithStats[] {
+  return [...rows].sort((left, right) => {
+    const latestEpisodeComparison = compareNumbersDesc(
+      parseDateMs(left.latest_episode_pub_date),
+      parseDateMs(right.latest_episode_pub_date)
+    );
+    if (latestEpisodeComparison !== 0) {
+      return latestEpisodeComparison;
+    }
+
+    const refreshedAtComparison = compareNumbersDesc(parseDateMs(left.last_refreshed_at), parseDateMs(right.last_refreshed_at));
+    if (refreshedAtComparison !== 0) {
+      return refreshedAtComparison;
+    }
+
+    const createdAtComparison = compareNumbersDesc(parseDateMs(left.created_at), parseDateMs(right.created_at));
+    if (createdAtComparison !== 0) {
+      return createdAtComparison;
+    }
+
+    return right.id - left.id;
+  });
+}
+
+function attachFeedEpisodeStats(rows: FeedRow[], episodeStats: EpisodeDateStatRow[]): FeedRowWithStats[] {
+  const statsByFeedId = new Map<number, { latestPubDate: string | null; latestPubDateMs: number | null; episodeCount: number }>();
+
+  for (const row of episodeStats) {
+    const existing = statsByFeedId.get(row.feed_id) ?? {
+      latestPubDate: null,
+      latestPubDateMs: null,
+      episodeCount: 0
+    };
+    const nextPubDateMs = parseDateMs(row.pub_date);
+
+    existing.episodeCount += 1;
+
+    if (compareNumbersDesc(nextPubDateMs, existing.latestPubDateMs) < 0) {
+      existing.latestPubDate = row.pub_date;
+      existing.latestPubDateMs = nextPubDateMs;
+    }
+
+    statsByFeedId.set(row.feed_id, existing);
+  }
+
+  return rows.map((row) => {
+    const stats = statsByFeedId.get(row.id);
+    return {
+      ...row,
+      latest_episode_pub_date: stats?.latestPubDate ?? null,
+      episode_count: stats?.episodeCount ?? 0
+    };
+  });
+}
+
+function buildFeedSummary(row: FeedRowWithStats): FeedSummary {
   return {
     id: row.id,
     slug: row.slug,
@@ -36,13 +153,16 @@ function buildFeedSummary(row: FeedRow): FeedSummary {
     language: row.language,
     categories: parseJsonArray(row.categories_json),
     status: row.status,
-    lastRefreshedAt: row.last_refreshed_at
+    lastRefreshedAt: row.last_refreshed_at,
+    latestEpisodePubDate: row.latest_episode_pub_date ?? null,
+    episodeCount: Number(row.episode_count ?? 0)
   };
 }
 
 function buildEpisodeSummary(
   row: EpisodeRow & { feed_slug: string; feed_title: string | null },
-  baseUrl: string
+  baseUrl: string,
+  uiBaseUrl: string
 ): EpisodeSummary {
   return {
     id: row.id,
@@ -63,7 +183,7 @@ function buildEpisodeSummary(
     cleanedEnclosureUrl: row.cleaned_enclosure_key ? `${baseUrl}/audio/${row.feed_slug}/${row.id}.mp3` : null,
     processingStatus: row.processing_status,
     lastError: row.last_error,
-    reportUrl: `${baseUrl}/report?feed=${encodeURIComponent(row.feed_slug)}&episode=${row.id}`
+    reportUrl: `${uiBaseUrl}/report?feed=${encodeURIComponent(row.feed_slug)}&episode=${row.id}`
   };
 }
 
@@ -133,6 +253,10 @@ async function getFeedByNormalizedUrl(db: D1Database, normalizedUrl: string): Pr
     .first<FeedRow>();
 
   return result ?? null;
+}
+
+export async function getFeedBySourceUrl(db: D1Database, sourceUrl: string): Promise<FeedRow | null> {
+  return getFeedByNormalizedUrl(db, normalizeFeedUrl(sourceUrl));
 }
 
 async function insertFeed(db: D1Database, sourceUrl: string, normalizedUrl: string): Promise<FeedRow> {
@@ -378,34 +502,104 @@ export async function enqueueEpisodeJobs(
   }
 }
 
-export async function getHomeData(db: D1Database, baseUrl: string): Promise<HomeResponse> {
+export async function getHomeData(db: D1Database, baseUrl: string, uiBaseUrl: string): Promise<HomeResponse> {
   const latestEpisodes = await db
     .prepare(
       `SELECT episodes.*, feeds.slug AS feed_slug, feeds.title AS feed_title
       FROM episodes
-      INNER JOIN feeds ON feeds.id = episodes.feed_id
-      ORDER BY COALESCE(episodes.last_processed_at, episodes.pub_date, episodes.updated_at) DESC
-      LIMIT 12`
+      INNER JOIN feeds ON feeds.id = episodes.feed_id`
     )
     .all<EpisodeRow & { feed_slug: string; feed_title: string | null }>();
 
   const feeds = await db
     .prepare(
       `SELECT *
-      FROM feeds
-      ORDER BY COALESCE(last_refreshed_at, updated_at, created_at) DESC
-      LIMIT 12`
+      FROM feeds`
     )
     .all<FeedRow>();
 
+  const feedEpisodeStats = await db
+    .prepare(
+      `SELECT feed_id, pub_date
+      FROM episodes`
+    )
+    .all<EpisodeDateStatRow>();
+
+  const feedsWithStats = attachFeedEpisodeStats(feeds.results, feedEpisodeStats.results);
+
   return {
-    latestEpisodes: latestEpisodes.results.map((row) => buildEpisodeSummary(row, baseUrl)),
-    feeds: feeds.results.map(buildFeedSummary)
+    latestEpisodes: sortEpisodeRows(latestEpisodes.results)
+      .slice(0, 10)
+      .map((row) => buildEpisodeSummary(row, baseUrl, uiBaseUrl)),
+    feeds: sortFeedRows(feedsWithStats)
+      .slice(0, 12)
+      .map(buildFeedSummary)
   };
 }
 
-export async function getFeedDetail(db: D1Database, slug: string, baseUrl: string): Promise<FeedDetailResponse | null> {
-  const feed = await getFeedBySlug(db, slug);
+export async function listFeeds(db: D1Database, query?: string): Promise<FeedsListResponse> {
+  if (query && query.length > 0) {
+    const pattern = `%${query}%`;
+    const feeds = await db
+      .prepare(
+        `SELECT *
+        FROM feeds
+        WHERE title LIKE ?1 OR description LIKE ?1 OR author LIKE ?1`
+      )
+      .bind(pattern)
+      .all<FeedRow>();
+
+    const feedEpisodeStats = await db
+      .prepare(
+        `SELECT feed_id, pub_date
+        FROM episodes`
+      )
+      .all<EpisodeDateStatRow>();
+
+    const feedsWithStats = attachFeedEpisodeStats(feeds.results, feedEpisodeStats.results);
+
+    const total = await db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM feeds
+        WHERE title LIKE ?1 OR description LIKE ?1 OR author LIKE ?1`
+      )
+      .bind(pattern)
+      .first<{ count: number | string }>();
+
+    return {
+      feeds: sortFeedRows(feedsWithStats).slice(0, 100).map(buildFeedSummary),
+      total: Number(total?.count ?? feeds.results.length)
+    };
+  }
+
+  const feeds = await db
+    .prepare(
+      `SELECT *
+      FROM feeds`
+    )
+    .all<FeedRow>();
+
+  const feedEpisodeStats = await db
+    .prepare(
+      `SELECT feed_id, pub_date
+      FROM episodes`
+    )
+    .all<EpisodeDateStatRow>();
+
+  const feedsWithStats = attachFeedEpisodeStats(feeds.results, feedEpisodeStats.results);
+
+  const total = await db
+    .prepare("SELECT COUNT(*) AS count FROM feeds")
+    .first<{ count: number | string }>();
+
+  return {
+    feeds: sortFeedRows(feedsWithStats).slice(0, 100).map(buildFeedSummary),
+    total: Number(total?.count ?? feeds.results.length)
+  };
+}
+
+export async function getFeedDetail(db: D1Database, slug: string, baseUrl: string, uiBaseUrl: string): Promise<FeedDetailResponse | null> {
+  const feed = await db.prepare("SELECT * FROM feeds WHERE slug = ?1 LIMIT 1").bind(slug).first<FeedRow>();
 
   if (!feed) {
     return null;
@@ -416,17 +610,24 @@ export async function getFeedDetail(db: D1Database, slug: string, baseUrl: strin
       `SELECT episodes.*, feeds.slug AS feed_slug, feeds.title AS feed_title
       FROM episodes
       INNER JOIN feeds ON feeds.id = episodes.feed_id
-      WHERE feeds.slug = ?1
-      ORDER BY COALESCE(episodes.pub_date, episodes.updated_at) DESC
-      LIMIT 50`
+      WHERE feeds.slug = ?1`
     )
     .bind(slug)
     .all<EpisodeRow & { feed_slug: string; feed_title: string | null }>();
 
+  const sortedEpisodes = sortEpisodeRows(episodes.results);
+  const feedWithStats: FeedRowWithStats = {
+    ...feed,
+    latest_episode_pub_date: sortedEpisodes[0]?.pub_date ?? null,
+    episode_count: sortedEpisodes.length
+  };
+
   return {
-    feed: buildFeedSummary(feed),
-    episodes: episodes.results.map((row) => buildEpisodeSummary(row, baseUrl)),
-    proxiedFeedUrl: `${baseUrl}/feeds/${feed.slug}.xml`
+    feed: buildFeedSummary(feedWithStats),
+    episodes: sortedEpisodes
+      .slice(0, 50)
+      .map((row) => buildEpisodeSummary(row, baseUrl, uiBaseUrl)),
+    proxiedFeedUrl: `${baseUrl}/feeds/${feedWithStats.slug}.xml`
   };
 }
 

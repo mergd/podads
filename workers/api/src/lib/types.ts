@@ -2,9 +2,13 @@ import type { EpisodeProcessingStatus, FeedStatus } from "@podads/shared/api";
 
 export type {
   ComplaintRequest,
+  FeedLookupResponse,
+  FeedPreviewEpisode,
+  FeedPreviewResponse,
   EpisodeProcessingStatus,
   EpisodeSummary,
   FeedDetailResponse,
+  FeedsListResponse,
   FeedStatus,
   FeedSummary,
   HomeResponse,

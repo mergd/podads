@@ -43,18 +43,7 @@ function getProcessingBatchWindowSeconds(env: Env): number {
 }
 
 export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
-  const response = await fetch(feed.source_url, {
-    headers: {
-      "user-agent": "podads-bot/0.1"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Feed refresh failed with status ${response.status}`);
-  }
-
-  const xml = await response.text();
-  const source = parseSourceFeed(xml);
+  const source = await fetchSourceFeed(feed.source_url);
   await updateFeedFromSource(env.DB, feed.id, source);
   await upsertEpisodes(env.DB, feed.id, source, env.PROCESSING_VERSION);
 
@@ -98,6 +87,21 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
   });
 
   return messages.length;
+}
+
+export async function fetchSourceFeed(sourceUrl: string): Promise<SourceFeed> {
+  const response = await fetch(sourceUrl, {
+    headers: {
+      "user-agent": "podads-bot/0.1"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Feed refresh failed with status ${response.status}`);
+  }
+
+  const xml = await response.text();
+  return parseSourceFeed(xml);
 }
 
 export async function refreshFeedWithErrorCapture(env: Env, feed: FeedRow): Promise<number> {

@@ -1,0 +1,18 @@
+.bone {
+  background: var(--color-bg-inset);
+  border-radius: var(--radius-sm);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.circular {
+  border-radius: 50%;
+}
+
+.rounded {
+  border-radius: var(--radius-lg);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

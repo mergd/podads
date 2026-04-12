@@ -1,10 +1,12 @@
 import { Button, Field, Form, Input } from "@base-ui/react";
-import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
-import { submitComplaint } from "../lib/api";
+import { Skeleton } from "../components/Skeleton";
+import { fetchFeed, submitComplaint } from "../lib/api";
+import { decodeEntities } from "../lib/entities";
 import { captureUiEvent } from "../lib/posthog";
-import type { ComplaintRequest } from "@podads/shared/api";
+import type { ComplaintRequest, FeedDetailResponse } from "@podads/shared/api";
 import styles from "./report.module.css";
 
 interface ComplaintValues {
@@ -17,6 +19,7 @@ export function ReportPage() {
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [detail, setDetail] = useState<FeedDetailResponse | null>(null);
 
   const context = useMemo(
     () => ({
@@ -26,79 +29,150 @@ export function ReportPage() {
     [searchParams]
   );
 
-  return (
-    <div className={styles.page}>
-      <section className={styles.card}>
-        <div>
+  useEffect(() => {
+    if (!context.feedSlug) return;
+    let active = true;
+
+    async function load() {
+      try {
+        const next = await fetchFeed(context.feedSlug!);
+        if (active) setDetail(next);
+      } catch {
+        // feed context is optional, don't block the form
+      }
+    }
+
+    void load();
+    return () => { active = false; };
+  }, [context.feedSlug]);
+
+  const episode = detail?.episodes.find((ep) => ep.id === context.episodeId);
+
+  if (!context.feedSlug) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.header}>
           <h1 className={styles.title}>Report an issue</h1>
           <p className={styles.lede}>
-            If the proxy missed an ad, cut too aggressively, or preserved the wrong metadata, send the context here.
+            To report a problem, navigate to a show and use the report link on a specific episode.
           </p>
         </div>
+        <Link className={styles.backLink} to="/" viewTransition>Browse shows</Link>
+      </div>
+    );
+  }
 
-        <div className={styles.context}>
-          <span>Feed: {context.feedSlug ?? "Unknown"}</span>
-          <span>Episode: {context.episodeId ?? "Not specified"}</span>
-        </div>
-
-        <Form<ComplaintValues>
-          className={styles.form}
-          onFormSubmit={async (values) => {
-            setStatus(null);
-            setErrorMessage(null);
-
-            try {
-              await submitComplaint({
-                feedSlug: context.feedSlug,
-                episodeId: context.episodeId,
-                email: String(values.email ?? "").trim() || undefined,
-                issueType: values.issueType,
-                message: String(values.message ?? "").trim()
-              });
-              setStatus("Thanks. The complaint was captured and is ready for analysis.");
-              captureUiEvent("complaint_submitted", {
-                feed_slug: context.feedSlug ?? null,
-                episode_id: context.episodeId ?? null,
-                issue_type: values.issueType
-              });
-            } catch (error) {
-              setErrorMessage(error instanceof Error ? error.message : "Could not submit this complaint.");
-            }
-          }}
-        >
-          <Field.Root className={styles.field} name="email">
-            <Field.Label className={styles.label}>Email (optional)</Field.Label>
-            <Input className={styles.input} placeholder="you@example.com" type="email" />
-          </Field.Root>
-
-          <label className={styles.field}>
-            <span className={styles.label}>Issue type</span>
-            <select className={styles.select} defaultValue="bad_cut" name="issueType">
-              <option value="bad_cut">Bad cut</option>
-              <option value="missed_ad">Missed ad</option>
-              <option value="metadata_issue">Metadata issue</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.label}>What happened?</span>
-            <textarea
-              className={styles.textarea}
-              name="message"
-              placeholder="Tell us what the proxy missed or cut incorrectly."
-              required
+  return (
+    <div className={styles.page}>
+      {detail ? (
+        <div className={styles.showContext}>
+          {detail.feed.imageUrl ? (
+            <img
+              alt=""
+              className={styles.showArt}
+              src={detail.feed.imageUrl}
+              style={{ viewTransitionName: `feed-art-${detail.feed.slug}` }}
             />
-          </label>
+          ) : (
+            <div
+              className={styles.showArtFallback}
+              style={{ viewTransitionName: `feed-art-${detail.feed.slug}` }}
+            >
+              {decodeEntities(detail.feed.title ?? "P").charAt(0)}
+            </div>
+          )}
+          <div className={styles.showInfo}>
+            <Link
+              className={styles.showName}
+              style={{ viewTransitionName: `feed-title-${detail.feed.slug}` }}
+              to={`/${detail.feed.slug}`}
+              viewTransition
+            >
+              {decodeEntities(detail.feed.title)}
+            </Link>
+            {episode ? (
+              <div className={styles.episodeInfo}>
+                <span className={styles.episodeLabel}>Episode:</span>
+                <span>{decodeEntities(episode.title)}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : context.feedSlug ? (
+        <div className={styles.showContext}>
+          <Skeleton variant="rounded" width="3rem" height="3rem" style={{ viewTransitionName: `feed-art-${context.feedSlug}` }} />
+          <div className={styles.showInfo}>
+            <Skeleton width="40%" height={14} style={{ viewTransitionName: `feed-title-${context.feedSlug}` }} />
+            {context.episodeId ? <Skeleton width="60%" height={10} /> : null}
+          </div>
+        </div>
+      ) : null}
 
-          <Button className={styles.button} type="submit">
-            Send complaint
-          </Button>
-        </Form>
+      <div className={styles.header}>
+        <h1 className={styles.title}>Report an issue</h1>
+        <p className={styles.lede}>
+          Bad cut, missed ad, or wrong metadata on this {episode ? "episode" : "show"}? Let us know.
+        </p>
+      </div>
 
-        {status ? <div className={styles.status}>{status}</div> : null}
-        {errorMessage ? <div className={styles.error}>{errorMessage}</div> : null}
-      </section>
+      <Form<ComplaintValues>
+        className={styles.form}
+        onFormSubmit={async (values) => {
+          setStatus(null);
+          setErrorMessage(null);
+
+          try {
+            await submitComplaint({
+              feedSlug: context.feedSlug,
+              episodeId: context.episodeId,
+              email: String(values.email ?? "").trim() || undefined,
+              issueType: values.issueType,
+              message: String(values.message ?? "").trim()
+            });
+            setStatus("Thanks — complaint captured and ready for analysis.");
+            captureUiEvent("complaint_submitted", {
+              feed_slug: context.feedSlug ?? null,
+              episode_id: context.episodeId ?? null,
+              issue_type: values.issueType
+            });
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "Could not submit this complaint.");
+          }
+        }}
+      >
+        <Field.Root className={styles.field} name="email">
+          <Field.Label className={styles.label}>Email (optional)</Field.Label>
+          <Input className={styles.input} placeholder="you@example.com" type="email" />
+        </Field.Root>
+
+        <label className={styles.field}>
+          <span className={styles.label}>Issue type</span>
+          <select className={styles.select} defaultValue="bad_cut" name="issueType">
+            <option value="bad_cut">Bad cut</option>
+            <option value="missed_ad">Missed ad</option>
+            <option value="metadata_issue">Metadata issue</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+
+        <label className={styles.field}>
+          <span className={styles.label}>What happened?</span>
+          <textarea
+            className={styles.textarea}
+            name="message"
+            placeholder="Describe what the proxy missed or cut incorrectly."
+            required
+            rows={5}
+          />
+        </label>
+
+        <Button className={styles.button} type="submit">
+          Send report
+        </Button>
+      </Form>
+
+      {status ? <div className={styles.success}>{status}</div> : null}
+      {errorMessage ? <div className={styles.error}>{errorMessage}</div> : null}
     </div>
   );
 }

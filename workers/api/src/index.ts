@@ -1,16 +1,20 @@
 import { runScheduledRefresh } from "./cron";
-import { refreshFeedWithErrorCapture } from "./lib/feedSync";
+import { fetchSourceFeed, refreshFeedWithErrorCapture } from "./lib/feedSync";
 import {
   formatRegisterResponse,
   getEpisodeAudioSource,
+  getFeedBySourceUrl,
   getFeedBySlug,
   getFeedDetail,
   getHomeData,
+  listFeeds,
   registerFeed
 } from "./lib/feedRegistry";
 import { capturePostHogEvent } from "./lib/posthog";
 import { buildProxiedRssXml } from "./lib/rss";
-import type { ComplaintRequest, RegisterFeedRequest } from "@podads/shared/api";
+import type { ComplaintRequest, FeedLookupResponse, FeedPreviewResponse, RegisterFeedRequest } from "@podads/shared/api";
+
+const PREVIEW_EPISODE_LIMIT = 5;
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
@@ -71,6 +75,97 @@ function getBaseUrl(request: Request, env: Env): string {
   return requestUrl.origin;
 }
 
+function getUiBaseUrl(request: Request, env: Env): string {
+  const requestUrl = new URL(request.url);
+  if (requestUrl.hostname === "localhost" || requestUrl.hostname === "127.0.0.1") {
+    return env.PUBLIC_UI_BASE_URL;
+  }
+
+  return env.PUBLIC_UI_BASE_URL;
+}
+
+async function handleFeedLookup(request: Request, env: Env): Promise<Response> {
+  const requestUrl = new URL(request.url);
+  const sourceUrl = requestUrl.searchParams.get("url")?.trim();
+
+  if (!sourceUrl) {
+    return badRequest("A podcast RSS URL is required.");
+  }
+
+  try {
+    const feed = await getFeedBySourceUrl(env.DB, sourceUrl);
+    const response: FeedLookupResponse = {
+      exists: Boolean(feed),
+      match: feed ? formatRegisterResponse(feed, false, getBaseUrl(request, env)) : null
+    };
+
+    return json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown feed lookup failure";
+    return json({ error: message }, 400);
+  }
+}
+
+async function handleFeedPreview(request: Request, env: Env): Promise<Response> {
+  const body = (await request.json()) as Partial<RegisterFeedRequest>;
+
+  if (!body.url) {
+    return badRequest("A podcast RSS URL is required.");
+  }
+
+  try {
+    const existing = await getFeedBySourceUrl(env.DB, body.url);
+
+    if (existing) {
+      const detail = await getFeedDetail(env.DB, existing.slug, getBaseUrl(request, env), getUiBaseUrl(request, env));
+
+      if (!detail) {
+        return json({ error: "Feed exists but could not be previewed." }, 500);
+      }
+
+      const response: FeedPreviewResponse = {
+        exists: true,
+        title: detail.feed.title,
+        description: detail.feed.description,
+        imageUrl: detail.feed.imageUrl,
+        author: detail.feed.author,
+        episodeCount: detail.episodes.length,
+        episodes: detail.episodes.slice(0, PREVIEW_EPISODE_LIMIT).map((episode) => ({
+          title: episode.title,
+          pubDate: episode.pubDate,
+          duration: episode.duration,
+          imageUrl: episode.imageUrl
+        })),
+        match: formatRegisterResponse(existing, false, getBaseUrl(request, env))
+      };
+
+      return json(response);
+    }
+
+    const source = await fetchSourceFeed(body.url);
+    const response: FeedPreviewResponse = {
+      exists: false,
+      title: source.title,
+      description: source.description,
+      imageUrl: source.imageUrl,
+      author: source.author,
+      episodeCount: source.episodes.length,
+      episodes: source.episodes.slice(0, PREVIEW_EPISODE_LIMIT).map((episode) => ({
+        title: episode.title ?? "Untitled episode",
+        pubDate: episode.pubDate,
+        duration: episode.duration,
+        imageUrl: episode.imageUrl
+      })),
+      match: null
+    };
+
+    return json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown feed preview failure";
+    return json({ error: message }, 400);
+  }
+}
+
 async function handleRegisterFeed(request: Request, env: Env): Promise<Response> {
   const body = (await request.json()) as Partial<RegisterFeedRequest>;
 
@@ -105,7 +200,7 @@ async function handleRegisterFeed(request: Request, env: Env): Promise<Response>
 }
 
 async function handleFeedDetail(request: Request, env: Env, slug: string): Promise<Response> {
-  const detail = await getFeedDetail(env.DB, slug, getBaseUrl(request, env));
+  const detail = await getFeedDetail(env.DB, slug, getBaseUrl(request, env), getUiBaseUrl(request, env));
 
   if (!detail) {
     return notFound();
@@ -123,8 +218,15 @@ async function handleFeedDetail(request: Request, env: Env, slug: string): Promi
 }
 
 async function handleHome(request: Request, env: Env): Promise<Response> {
-  const home = await getHomeData(env.DB, getBaseUrl(request, env));
+  const home = await getHomeData(env.DB, getBaseUrl(request, env), getUiBaseUrl(request, env));
   return json(home);
+}
+
+async function handleListFeeds(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("q")?.trim() || undefined;
+  const result = await listFeeds(env.DB, query);
+  return json(result);
 }
 
 async function handleReport(request: Request, env: Env): Promise<Response> {
@@ -152,7 +254,7 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleRss(request: Request, env: Env, slug: string): Promise<Response> {
-  const detail = await getFeedDetail(env.DB, slug, getBaseUrl(request, env));
+  const detail = await getFeedDetail(env.DB, slug, getBaseUrl(request, env), getUiBaseUrl(request, env));
 
   if (!detail) {
     return notFound();
@@ -224,6 +326,18 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/home") {
       return handleHome(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/feeds") {
+      return handleListFeeds(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/feeds/lookup") {
+      return handleFeedLookup(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/feeds/preview") {
+      return handleFeedPreview(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/api/feeds/register") {

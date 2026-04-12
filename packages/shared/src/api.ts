@@ -14,6 +14,8 @@ export interface FeedSummary {
   categories: string[];
   status: FeedStatus;
   lastRefreshedAt: string | null;
+  latestEpisodePubDate: string | null;
+  episodeCount: number;
 }
 
 export interface EpisodeSummary {
@@ -57,6 +59,34 @@ export interface RegisterFeedResponse {
   created: boolean;
   proxiedFeedUrl: string;
   feed: FeedSummary;
+}
+
+export interface FeedLookupResponse {
+  exists: boolean;
+  match: RegisterFeedResponse | null;
+}
+
+export interface FeedPreviewEpisode {
+  title: string;
+  pubDate: string | null;
+  duration: string | null;
+  imageUrl: string | null;
+}
+
+export interface FeedPreviewResponse {
+  exists: boolean;
+  title: string;
+  description: string | null;
+  imageUrl: string | null;
+  author: string | null;
+  episodeCount: number;
+  episodes: FeedPreviewEpisode[];
+  match: RegisterFeedResponse | null;
+}
+
+export interface FeedsListResponse {
+  feeds: FeedSummary[];
+  total: number;
 }
 
 export interface ComplaintRequest {

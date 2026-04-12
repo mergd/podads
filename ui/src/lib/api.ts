@@ -1,6 +1,14 @@
-import type { ComplaintRequest, FeedDetailResponse, HomeResponse, RegisterFeedResponse } from "@podads/shared/api";
+import type {
+  ComplaintRequest,
+  FeedDetailResponse,
+  FeedLookupResponse,
+  FeedPreviewResponse,
+  FeedsListResponse,
+  HomeResponse,
+  RegisterFeedResponse
+} from "@podads/shared/api";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8787";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function parseJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T | { error?: string };
@@ -18,9 +26,33 @@ export async function fetchHome(): Promise<HomeResponse> {
   return parseJson<HomeResponse>(response);
 }
 
+export async function fetchFeeds(query?: string): Promise<FeedsListResponse> {
+  const params = query ? `?q=${encodeURIComponent(query)}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/feeds${params}`);
+  return parseJson<FeedsListResponse>(response);
+}
+
 export async function fetchFeed(slug: string): Promise<FeedDetailResponse> {
   const response = await fetch(`${API_BASE_URL}/api/feeds/${slug}`);
   return parseJson<FeedDetailResponse>(response);
+}
+
+export async function lookupFeed(url: string): Promise<FeedLookupResponse> {
+  const params = `?url=${encodeURIComponent(url)}`;
+  const response = await fetch(`${API_BASE_URL}/api/feeds/lookup${params}`);
+  return parseJson<FeedLookupResponse>(response);
+}
+
+export async function previewFeed(url: string): Promise<FeedPreviewResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/feeds/preview`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ url })
+  });
+
+  return parseJson<FeedPreviewResponse>(response);
 }
 
 export async function registerFeed(url: string): Promise<RegisterFeedResponse> {

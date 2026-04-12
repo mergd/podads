@@ -1,0 +1,36 @@
+.root {
+  line-height: 1.5;
+}
+
+.root p {
+  margin: 0;
+}
+
+.root p + p {
+  margin-top: 0.5em;
+}
+
+.root a {
+  color: var(--color-accent);
+}
+
+.root a:hover {
+  text-decoration: underline;
+}
+
+.root ul,
+.root ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.root li + li {
+  margin-top: 0.2em;
+}
+
+.root blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 2px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+}

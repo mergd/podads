@@ -169,7 +169,10 @@ export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[]
       const itemLink = episode.episodeLink ?? enclosureUrl;
       const guid = episode.guid ?? episode.sourceEnclosureUrl ?? String(episode.id);
 
-      return `<item>${renderOptionalTag("title", episode.title)}${renderOptionalTag("description", episode.description)}${renderOptionalTag("link", itemLink)}${renderOptionalTag("guid", guid)}${renderOptionalTag("author", episode.author)}${renderOptionalTag("itunes:author", episode.author)}${renderOptionalTag("pubDate", episode.pubDate)}${renderOptionalTag("itunes:duration", episode.duration)}${episode.imageUrl ? `<itunes:image href="${escapeXml(episode.imageUrl)}" />` : ""}<enclosure url="${escapeXml(enclosureUrl)}" type="${escapeXml(enclosureType)}"${enclosureLength} />${renderOptionalTag("podads:reportUrl", episode.reportUrl)}${renderOptionalTag("podads:status", episode.processingStatus)}</item>`;
+      const reportSuffix = `\n\n---\nThis episode is delivered via podads. Bad cut or missed ad? Report it: ${episode.reportUrl}`;
+      const descriptionWithReport = (episode.description ?? "") + reportSuffix;
+
+      return `<item>${renderOptionalTag("title", episode.title)}${renderOptionalTag("description", descriptionWithReport)}${renderOptionalTag("link", itemLink)}${renderOptionalTag("guid", guid)}${renderOptionalTag("author", episode.author)}${renderOptionalTag("itunes:author", episode.author)}${renderOptionalTag("pubDate", episode.pubDate)}${renderOptionalTag("itunes:duration", episode.duration)}${episode.imageUrl ? `<itunes:image href="${escapeXml(episode.imageUrl)}" />` : ""}<enclosure url="${escapeXml(enclosureUrl)}" type="${escapeXml(enclosureType)}"${enclosureLength} />${renderOptionalTag("podads:reportUrl", episode.reportUrl)}${renderOptionalTag("podads:status", episode.processingStatus)}</item>`;
     })
     .join("");
 
