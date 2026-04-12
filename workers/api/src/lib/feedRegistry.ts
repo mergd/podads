@@ -410,6 +410,28 @@ export async function upsertEpisodes(
   }
 }
 
+export async function markExcessEpisodesSkipped(
+  db: D1Database,
+  feedId: number,
+  keepRecentCount: number
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE episodes
+      SET processing_status = 'skipped', updated_at = ?3
+      WHERE feed_id = ?1
+        AND processing_status = 'pending'
+        AND id NOT IN (
+          SELECT id FROM episodes
+          WHERE feed_id = ?1
+          ORDER BY COALESCE(pub_date, created_at) DESC
+          LIMIT ?2
+        )`
+    )
+    .bind(feedId, keepRecentCount, new Date().toISOString())
+    .run();
+}
+
 export async function selectEpisodesForProcessing(
   db: D1Database,
   feedId: number,
@@ -442,20 +464,6 @@ export async function selectEpisodesForProcessing(
     id: row.id,
     expectedDurationSeconds: parseEpisodeDurationSeconds(row.duration)
   }));
-}
-
-export async function countActiveEpisodeJobs(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare(
-      `SELECT COUNT(*) AS count
-      FROM jobs
-      WHERE kind = 'episode.process'
-        AND status IN ('queued', 'processing')`
-    )
-    .first<{ count: number | string }>();
-
-  const count = Number(row?.count ?? 0);
-  return Number.isFinite(count) ? count : 0;
 }
 
 export async function enqueueEpisodeJobs(
@@ -660,6 +668,36 @@ export async function getEpisodeAudioSource(
     cleanedKey: episode.cleaned_enclosure_key,
     sourceUrl: episode.source_enclosure_url
   };
+}
+
+export async function getEpisodeById(
+  db: D1Database,
+  episodeId: number
+): Promise<(EpisodeRow & { feed_slug: string }) | null> {
+  const row = await db
+    .prepare(
+      `SELECT episodes.*, feeds.slug AS feed_slug
+      FROM episodes
+      INNER JOIN feeds ON feeds.id = episodes.feed_id
+      WHERE episodes.id = ?1
+      LIMIT 1`
+    )
+    .bind(episodeId)
+    .first<EpisodeRow & { feed_slug: string }>();
+
+  return row ?? null;
+}
+
+export async function resetEpisodeToPending(db: D1Database, episodeId: number): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE episodes
+      SET processing_status = 'pending', last_error = NULL, updated_at = ?2
+      WHERE id = ?1`
+    )
+    .bind(episodeId, now)
+    .run();
 }
 
 export async function markEpisodeProcessing(db: D1Database, episodeId: number, processingVersion: string): Promise<void> {

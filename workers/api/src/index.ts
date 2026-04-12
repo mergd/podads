@@ -1,18 +1,23 @@
+import type { ComplaintRequest, FeedLookupResponse, FeedPreviewResponse, RegisterFeedRequest } from "@podads/shared/api";
+import type { EpisodeQueueMessage } from "@podads/shared/queue";
+
 import { runScheduledRefresh } from "./cron";
 import { fetchSourceFeed, refreshFeedWithErrorCapture } from "./lib/feedSync";
 import {
+  enqueueEpisodeJobs,
   formatRegisterResponse,
   getEpisodeAudioSource,
+  getEpisodeById,
   getFeedBySourceUrl,
   getFeedBySlug,
   getFeedDetail,
   getHomeData,
   listFeeds,
-  registerFeed
+  registerFeed,
+  resetEpisodeToPending
 } from "./lib/feedRegistry";
 import { capturePostHogEvent } from "./lib/posthog";
 import { buildProxiedRssXml } from "./lib/rss";
-import type { ComplaintRequest, FeedLookupResponse, FeedPreviewResponse, RegisterFeedRequest } from "@podads/shared/api";
 
 const PREVIEW_EPISODE_LIMIT = 5;
 
@@ -293,6 +298,49 @@ async function handleAudio(request: Request, env: Env, slug: string, episodeId: 
   );
 }
 
+function unauthorized(): Response {
+  return json({ error: "Unauthorized" }, 401);
+}
+
+function verifyAdminSecret(request: Request, env: Env): boolean {
+  const header = request.headers.get("x-admin-secret");
+  return Boolean(env.ADMIN_SECRET) && header === env.ADMIN_SECRET;
+}
+
+async function handleAdminProcessEpisode(request: Request, env: Env, episodeId: number): Promise<Response> {
+  if (!verifyAdminSecret(request, env)) {
+    return unauthorized();
+  }
+
+  const episode = await getEpisodeById(env.DB, episodeId);
+
+  if (!episode) {
+    return notFound();
+  }
+
+  await resetEpisodeToPending(env.DB, episodeId);
+
+  const enqueuedAt = new Date().toISOString();
+  const message: EpisodeQueueMessage = {
+    type: "episode.process",
+    jobId: crypto.randomUUID(),
+    feedId: episode.feed_id,
+    episodeId: episode.id,
+    processingVersion: env.PROCESSING_VERSION,
+    enqueuedAt,
+    pollAttempt: 0
+  };
+
+  await enqueueEpisodeJobs(env.DB, env.PROCESSING_QUEUE, [message]);
+
+  return json({ ok: true, episodeId: episode.id, feedSlug: episode.feed_slug });
+}
+
+function parseAdminProcessEpisodeRoute(pathname: string): number | null {
+  const match = pathname.match(/^\/api\/admin\/episodes\/(\d+)\/process$/);
+  return match?.[1] ? Number(match[1]) : null;
+}
+
 function parseFeedSlug(pathname: string): string | null {
   const match = pathname.match(/^\/api\/feeds\/([^/]+)$/);
   return match?.[1] ?? null;
@@ -346,6 +394,13 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/api/report") {
       return handleReport(request, env);
+    }
+
+    if (request.method === "POST") {
+      const adminEpisodeId = parseAdminProcessEpisodeRoute(url.pathname);
+      if (adminEpisodeId !== null) {
+        return handleAdminProcessEpisode(request, env, adminEpisodeId);
+      }
     }
 
     if (request.method === "GET") {

@@ -1,8 +1,8 @@
 import type { EpisodeQueueMessage } from "@podads/shared/queue";
 
 import {
-  countActiveEpisodeJobs,
   enqueueEpisodeJobs,
+  markExcessEpisodesSkipped,
   markFeedRefreshFailure,
   selectEpisodesForProcessing,
   updateFeedFromSource,
@@ -22,11 +22,11 @@ function getMaxEpisodesPerRefresh(env: Env): number {
   return parsed;
 }
 
-function getMaxConcurrentProcessingJobs(env: Env): number {
-  const parsed = Number.parseInt(env.MAX_CONCURRENT_PROCESSING_JOBS, 10);
+function getMaxProcessableEpisodesPerFeed(env: Env): number {
+  const parsed = Number.parseInt(env.MAX_PROCESSABLE_EPISODES_PER_FEED, 10);
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 1;
+    return 2;
   }
 
   return parsed;
@@ -46,12 +46,9 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
   const source = await fetchSourceFeed(feed.source_url);
   await updateFeedFromSource(env.DB, feed.id, source);
   await upsertEpisodes(env.DB, feed.id, source, env.PROCESSING_VERSION);
+  await markExcessEpisodesSkipped(env.DB, feed.id, getMaxProcessableEpisodesPerFeed(env));
 
-  const activeProcessingJobs = await countActiveEpisodeJobs(env.DB);
-  const maxConcurrentProcessingJobs = getMaxConcurrentProcessingJobs(env);
-  const availableProcessingSlots = Math.max(0, maxConcurrentProcessingJobs - activeProcessingJobs);
-  const selectionLimit = Math.min(getMaxEpisodesPerRefresh(env), availableProcessingSlots);
-  const episodesToProcess = await selectEpisodesForProcessing(env.DB, feed.id, selectionLimit);
+  const episodesToProcess = await selectEpisodesForProcessing(env.DB, feed.id, getMaxEpisodesPerRefresh(env));
   const batchWindowSeconds = getProcessingBatchWindowSeconds(env);
   const enqueuedAt = new Date().toISOString();
   const messages: EpisodeQueueMessage[] = episodesToProcess.map((episode) => ({
@@ -78,9 +75,6 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
     properties: {
       episode_count: source.episodes.length,
       enqueued_episodes: messages.length,
-      active_processing_jobs: activeProcessingJobs,
-      available_processing_slots: availableProcessingSlots,
-      max_concurrent_processing_jobs: maxConcurrentProcessingJobs,
       processing_batch_window_seconds: batchWindowSeconds,
       feed_slug: feed.slug
     }

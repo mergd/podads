@@ -150,9 +150,13 @@
   letter-spacing: 0.03em;
 }
 
-.status[data-status="completed"] {
+.status[data-status="ready"] {
   background: var(--color-success-subtle);
   color: var(--color-success);
+}
+
+.status[data-status="skipped"] {
+  opacity: 0.5;
 }
 
 @media (max-width: 720px) {

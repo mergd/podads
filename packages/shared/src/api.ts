@@ -1,5 +1,5 @@
 export type FeedStatus = "pending" | "ready" | "error";
-export type EpisodeProcessingStatus = "pending" | "processing" | "ready" | "failed";
+export type EpisodeProcessingStatus = "pending" | "processing" | "ready" | "failed" | "skipped";
 
 export interface FeedSummary {
   id: number;
