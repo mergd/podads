@@ -16,6 +16,23 @@ Cloudflare-first monorepo for podcast feed registration, background episode proc
 - `bun run lint`: run the current lint/type validation commands
 - `bun run types`: regenerate Cloudflare Worker binding types with Wrangler
 
+## CI Deploys
+
+Pushes to `main` trigger `.github/workflows/deploy.yml`, which:
+
+- typechecks the Bun workspace
+- typechecks `services/transcriber`
+- builds and deploys `ui` to Cloudflare Pages
+- deploys `workers/api` to Cloudflare Workers
+- deploys `workers/processor` to Cloudflare Workers
+- deploys `services/transcriber` to Railway
+
+Required GitHub repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `RAILWAY_TOKEN`
+
 ## Database
 
 The initial D1 schema lives at `workers/api/schema/001_initial.sql`.
