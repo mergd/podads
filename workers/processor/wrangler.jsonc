@@ -38,9 +38,7 @@
     "APP_BASE_URL": "http://localhost:8787",
     "PROCESSING_VERSION": "v1",
     "CLASSIFICATION_PROVIDER": "openrouter",
-    "CLASSIFICATION_MODEL": "openai/gpt-4.1-nano",
     "TRANSCRIPTION_GATEWAY_URL": "https://transcriber-production-e6f9.up.railway.app",
-    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
     "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "observability": {

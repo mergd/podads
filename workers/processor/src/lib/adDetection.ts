@@ -1,5 +1,8 @@
 import { mockClassification } from "../providers/classification/mock";
-import { openRouterClassification } from "../providers/classification/openrouter";
+import {
+  OPENROUTER_CLASSIFICATION_MODEL,
+  openRouterClassification
+} from "../providers/classification/openrouter";
 import type { AdDetectionResult, AdSpan, TranscriptResult } from "./types";
 
 type ClassificationProvider = "mock" | "openrouter";
@@ -36,10 +39,10 @@ export async function detectAdSpans(env: Env, transcript: TranscriptResult): Pro
 
   switch (provider) {
     case "mock":
-      result = await mockClassification(env.CLASSIFICATION_MODEL, transcript.segments);
+      result = await mockClassification(OPENROUTER_CLASSIFICATION_MODEL, transcript.segments);
       break;
     case "openrouter":
-      result = await openRouterClassification(env, env.CLASSIFICATION_MODEL, transcript);
+      result = await openRouterClassification(env, transcript);
       break;
     default:
       result = assertNever(provider);

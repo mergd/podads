@@ -29,10 +29,7 @@ export interface OpenRouterMetrics {
   requestDurationMs: number;
 }
 
-function getOpenRouterBaseUrl(env: Env): string {
-  const baseUrl = env.OPENROUTER_BASE_URL?.trim();
-  return baseUrl && baseUrl.length > 0 ? baseUrl.replace(/\/+$/, "") : "https://openrouter.ai/api/v1";
-}
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 function extractMessageText(message: OpenRouterMessage | undefined): string {
   const content = message?.content;
@@ -104,7 +101,7 @@ export async function createOpenRouterChatCompletion(
   }
 
   const startedAt = Date.now();
-  const response = await fetch(`${getOpenRouterBaseUrl(env)}/chat/completions`, {
+  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,

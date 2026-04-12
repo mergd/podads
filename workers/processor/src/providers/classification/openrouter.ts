@@ -1,6 +1,8 @@
 import { createOpenRouterChatCompletion, parseStructuredOutput } from "../../lib/openrouter";
 import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 
+export const OPENROUTER_CLASSIFICATION_MODEL = "google/gemini-2.5-flash-lite";
+
 interface OpenRouterClassificationPayload {
   spans: Array<{
     startMs: number;
@@ -31,11 +33,10 @@ function buildPrompt(transcript: TranscriptResult): string {
 
 export async function openRouterClassification(
   env: Env,
-  model: string,
   transcript: TranscriptResult
 ): Promise<AdDetectionResult> {
   const { payload, metrics } = await createOpenRouterChatCompletion(env, {
-    model,
+    model: OPENROUTER_CLASSIFICATION_MODEL,
     temperature: 0.1,
     response_format: {
       type: "json_schema",
@@ -96,7 +97,7 @@ export async function openRouterClassification(
 
   return {
     provider: "openrouter",
-    model,
+    model: OPENROUTER_CLASSIFICATION_MODEL,
     spans,
     estimatedCostUsd: metrics.estimatedCostUsd,
     requestDurationMs: metrics.requestDurationMs,
