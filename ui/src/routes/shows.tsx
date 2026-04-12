@@ -1,44 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Skeleton } from "../components/Skeleton";
+import { useShowsSearch } from "../contexts/showsSearch";
 import { lastUpdatedLabel } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
-import { fetchFeeds } from "../lib/api";
-import type { FeedSummary } from "@podads/shared/api";
 import styles from "./shows.module.css";
 
 export function ShowsPage() {
-  const [feeds, setFeeds] = useState<FeedSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [query, setQuery] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
-
-  const load = useCallback(async (q: string) => {
-    setIsLoading(true);
-    try {
-      const result = await fetchFeeds(q || undefined);
-      setFeeds(result.feeds);
-      setTotal(result.total);
-    } catch {
-      // keep existing state on error
-    } finally {
-      setIsLoading(false);
-      setHasLoaded(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load("");
-  }, [load]);
-
-  function handleSearch(value: string) {
-    setQuery(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => void load(value), 250);
-  }
+  const { feeds, total, hasLoaded, query } = useShowsSearch();
 
   return (
     <div className={styles.page}>
@@ -46,16 +15,6 @@ export function ShowsPage() {
         <div className={styles.titleRow}>
           <h1 className={styles.title}>Shows</h1>
           <span className={styles.count}>{total}</span>
-        </div>
-        <div className={styles.searchWrap}>
-          <input
-            className={styles.search}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search shows..."
-            type="search"
-            value={query}
-          />
-          {isLoading && hasLoaded ? <div className={styles.spinner} /> : null}
         </div>
       </div>
 

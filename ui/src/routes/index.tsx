@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { FeedForm } from "../components/FeedForm";
 import { FeedGallery } from "../components/FeedGallery";
@@ -15,6 +16,7 @@ export function HomePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<RegisterFeedResponse | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let active = true;
@@ -54,7 +56,10 @@ export function HomePage() {
         feed_slug: nextResult.feed.slug,
         created: nextResult.created
       });
-      setHome(await fetchHome());
+      navigate(`/${nextResult.feed.slug}`, {
+        state: { title: nextResult.feed.title, imageUrl: nextResult.feed.imageUrl },
+        viewTransition: true
+      });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not register that feed.");
     } finally {

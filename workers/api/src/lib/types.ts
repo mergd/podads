@@ -49,6 +49,8 @@ export interface EpisodeRow {
   author: string | null;
   image_url: string | null;
   pub_date: string | null;
+  /** Unix ms from parsed pub_date; used for SQL ordering (TEXT pub_date sorts lexically, not by time). */
+  pub_date_ms?: number | null;
   duration: string | null;
   source_enclosure_url: string;
   source_enclosure_type: string | null;

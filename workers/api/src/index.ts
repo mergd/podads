@@ -14,7 +14,8 @@ import {
   getHomeData,
   listFeeds,
   registerFeed,
-  resetEpisodeToPending
+  resetEpisodeToPending,
+  selectGlobalPendingEpisodesForProcessing
 } from "./lib/feedRegistry";
 import { capturePostHogEvent } from "./lib/posthog";
 import { buildProxiedRssXml } from "./lib/rss";
@@ -307,6 +308,41 @@ function verifyAdminSecret(request: Request, env: Env): boolean {
   return Boolean(env.ADMIN_SECRET) && header === env.ADMIN_SECRET;
 }
 
+async function handleAdminProcessPendingEpisodes(request: Request, env: Env): Promise<Response> {
+  if (!verifyAdminSecret(request, env)) {
+    return unauthorized();
+  }
+
+  const requestUrl = new URL(request.url);
+  const rawLimit = requestUrl.searchParams.get("limit");
+  const parsed = rawLimit ? Number.parseInt(rawLimit, 10) : 500;
+  const limit = Number.isFinite(parsed) && parsed > 0 ? Math.min(2000, parsed) : 500;
+
+  const episodes = await selectGlobalPendingEpisodesForProcessing(env.DB, limit);
+  const enqueuedAt = new Date().toISOString();
+  const messages: EpisodeQueueMessage[] = episodes.map((episode) => ({
+    type: "episode.process",
+    jobId: crypto.randomUUID(),
+    feedId: episode.feedId,
+    episodeId: episode.id,
+    processingVersion: env.PROCESSING_VERSION,
+    enqueuedAt,
+    expectedDurationSeconds: episode.expectedDurationSeconds,
+    pollAttempt: 0
+  }));
+
+  if (messages.length > 0) {
+    await enqueueEpisodeJobs(env.DB, env.PROCESSING_QUEUE, messages);
+  }
+
+  return json({
+    ok: true,
+    enqueued: messages.length,
+    limit,
+    episodeIds: messages.map((m) => m.episodeId)
+  });
+}
+
 async function handleAdminProcessEpisode(request: Request, env: Env, episodeId: number): Promise<Response> {
   if (!verifyAdminSecret(request, env)) {
     return unauthorized();
@@ -397,6 +433,10 @@ export default {
     }
 
     if (request.method === "POST") {
+      if (url.pathname === "/api/admin/episodes/process-pending") {
+        return handleAdminProcessPendingEpisodes(request, env);
+      }
+
       const adminEpisodeId = parseAdminProcessEpisodeRoute(url.pathname);
       if (adminEpisodeId !== null) {
         return handleAdminProcessEpisode(request, env, adminEpisodeId);

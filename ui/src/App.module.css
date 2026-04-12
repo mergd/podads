@@ -20,7 +20,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 2.8rem;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-height: 2.8rem;
+  padding: var(--space-2) 0;
 }
 
 .brand {

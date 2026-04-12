@@ -71,6 +71,39 @@ function pickEpisodeImage(item: Record<string, unknown>, channel: Record<string,
   return null;
 }
 
+function normalizeToIso(dateString: string | null): string | null {
+  if (!dateString) {
+    return null;
+  }
+
+  const ms = Date.parse(dateString);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : dateString;
+}
+
+const RFC_2822_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const RFC_2822_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+function toRfc2822(isoString: string | null | undefined): string | null {
+  if (!isoString) {
+    return null;
+  }
+
+  const date = new Date(isoString);
+  if (!Number.isFinite(date.getTime())) {
+    return isoString;
+  }
+
+  const day = RFC_2822_DAYS[date.getUTCDay()];
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const mon = RFC_2822_MONTHS[date.getUTCMonth()];
+  const yyyy = date.getUTCFullYear();
+  const hh = String(date.getUTCHours()).padStart(2, "0");
+  const mm = String(date.getUTCMinutes()).padStart(2, "0");
+  const ss = String(date.getUTCSeconds()).padStart(2, "0");
+
+  return `${day}, ${dd} ${mon} ${yyyy} ${hh}:${mm}:${ss} +0000`;
+}
+
 function escapeXml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -108,7 +141,7 @@ export function parseSourceFeed(xml: string): SourceFeed {
       }
 
       const guid = firstString(item.guid);
-      const pubDate = firstString(item.pubDate);
+      const pubDate = normalizeToIso(firstString(item.pubDate));
       const title = firstString(item.title);
       const episodeKey =
         guid ??
@@ -172,7 +205,7 @@ export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[]
       const reportSuffix = `\n\n---\nThis episode is delivered via podads. Bad cut or missed ad? Report it: ${episode.reportUrl}`;
       const descriptionWithReport = (episode.description ?? "") + reportSuffix;
 
-      return `<item>${renderOptionalTag("title", episode.title)}${renderOptionalTag("description", descriptionWithReport)}${renderOptionalTag("link", itemLink)}${renderOptionalTag("guid", guid)}${renderOptionalTag("author", episode.author)}${renderOptionalTag("itunes:author", episode.author)}${renderOptionalTag("pubDate", episode.pubDate)}${renderOptionalTag("itunes:duration", episode.duration)}${episode.imageUrl ? `<itunes:image href="${escapeXml(episode.imageUrl)}" />` : ""}<enclosure url="${escapeXml(enclosureUrl)}" type="${escapeXml(enclosureType)}"${enclosureLength} />${renderOptionalTag("podads:reportUrl", episode.reportUrl)}${renderOptionalTag("podads:status", episode.processingStatus)}</item>`;
+      return `<item>${renderOptionalTag("title", episode.title)}${renderOptionalTag("description", descriptionWithReport)}${renderOptionalTag("link", itemLink)}${renderOptionalTag("guid", guid)}${renderOptionalTag("author", episode.author)}${renderOptionalTag("itunes:author", episode.author)}${renderOptionalTag("pubDate", toRfc2822(episode.pubDate))}${renderOptionalTag("itunes:duration", episode.duration)}${episode.imageUrl ? `<itunes:image href="${escapeXml(episode.imageUrl)}" />` : ""}<enclosure url="${escapeXml(enclosureUrl)}" type="${escapeXml(enclosureType)}"${enclosureLength} />${renderOptionalTag("podads:reportUrl", episode.reportUrl)}${renderOptionalTag("podads:status", episode.processingStatus)}</item>`;
     })
     .join("");
 

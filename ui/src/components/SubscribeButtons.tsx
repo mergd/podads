@@ -68,7 +68,7 @@ export function SubscribeButtons({ feedUrl }: SubscribeButtonsProps) {
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Backdrop className={styles.backdrop} />
-        <Dialog.Viewport>
+        <Dialog.Viewport className={styles.viewport}>
           <Dialog.Popup className={styles.popup}>
             <Dialog.Title className={styles.title}>Add to podcast player</Dialog.Title>
             <Dialog.Description className={styles.subtitle}>

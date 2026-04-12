@@ -43,6 +43,11 @@ function parseDateMs(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** SQL expression: newest-first using stored ms, else episode row creation time. */
+const EPISODE_SORT_MS_SQL = "COALESCE(episodes.pub_date_ms, CAST(strftime('%s', episodes.created_at) AS INTEGER) * 1000)";
+
+const EPISODE_SORT_MS_SQL_BARE = "COALESCE(pub_date_ms, CAST(strftime('%s', created_at) AS INTEGER) * 1000)";
+
 function compareNumbersDesc(left: number | null, right: number | null): number {
   if (left === null && right === null) {
     return 0;
@@ -63,7 +68,9 @@ function sortEpisodeRows(
   rows: Array<EpisodeRow & { feed_slug: string; feed_title: string | null }>
 ): Array<EpisodeRow & { feed_slug: string; feed_title: string | null }> {
   return [...rows].sort((left, right) => {
-    const pubDateComparison = compareNumbersDesc(parseDateMs(left.pub_date), parseDateMs(right.pub_date));
+    const leftMs = left.pub_date_ms ?? parseDateMs(left.pub_date);
+    const rightMs = right.pub_date_ms ?? parseDateMs(right.pub_date);
+    const pubDateComparison = compareNumbersDesc(leftMs, rightMs);
     if (pubDateComparison !== 0) {
       return pubDateComparison;
     }
@@ -351,8 +358,9 @@ export async function upsertEpisodes(
   processingVersion: string
 ): Promise<void> {
   const now = new Date().toISOString();
-  const statements = source.episodes.map((episode) =>
-    db
+  const statements = source.episodes.map((episode) => {
+    const pubDateMs = parseDateMs(episode.pubDate);
+    return db
       .prepare(
         `INSERT INTO episodes (
           feed_id,
@@ -364,6 +372,7 @@ export async function upsertEpisodes(
           author,
           image_url,
           pub_date,
+          pub_date_ms,
           duration,
           source_enclosure_url,
           source_enclosure_type,
@@ -371,7 +380,7 @@ export async function upsertEpisodes(
           processing_status,
           processing_version,
           updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'pending', ?14, ?15)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'pending', ?15, ?16)
         ON CONFLICT(feed_id, episode_key) DO UPDATE SET
           guid = excluded.guid,
           title = excluded.title,
@@ -380,6 +389,7 @@ export async function upsertEpisodes(
           author = excluded.author,
           image_url = excluded.image_url,
           pub_date = excluded.pub_date,
+          pub_date_ms = excluded.pub_date_ms,
           duration = excluded.duration,
           source_enclosure_url = excluded.source_enclosure_url,
           source_enclosure_type = excluded.source_enclosure_type,
@@ -396,14 +406,15 @@ export async function upsertEpisodes(
         episode.author,
         episode.imageUrl,
         episode.pubDate,
+        pubDateMs,
         episode.duration,
         episode.sourceEnclosureUrl,
         episode.sourceEnclosureType,
         episode.sourceEnclosureLength,
         processingVersion,
         now
-      )
-  );
+      );
+  });
 
   for (const chunk of chunkArray(statements, D1_BATCH_SIZE)) {
     await db.batch(chunk);
@@ -424,7 +435,7 @@ export async function markExcessEpisodesSkipped(
         AND id NOT IN (
           SELECT id FROM episodes
           WHERE feed_id = ?1
-          ORDER BY COALESCE(pub_date, created_at) DESC
+          ORDER BY ${EPISODE_SORT_MS_SQL_BARE} DESC
           LIMIT ?2
         )`
     )
@@ -454,7 +465,7 @@ export async function selectEpisodesForProcessing(
         AND active_jobs.id IS NULL
       ORDER BY
         CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
-        COALESCE(episodes.pub_date, episodes.updated_at, episodes.created_at) DESC
+        ${EPISODE_SORT_MS_SQL} DESC
       LIMIT ?2`
     )
     .bind(feedId, limit)
@@ -462,6 +473,39 @@ export async function selectEpisodesForProcessing(
 
   return rows.results.map((row) => ({
     id: row.id,
+    expectedDurationSeconds: parseEpisodeDurationSeconds(row.duration)
+  }));
+}
+
+export async function selectGlobalPendingEpisodesForProcessing(
+  db: D1Database,
+  limit: number
+): Promise<Array<{ id: number; feedId: number; expectedDurationSeconds?: number }>> {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT episodes.id, episodes.feed_id, episodes.duration
+      FROM episodes
+      LEFT JOIN jobs AS active_jobs
+        ON active_jobs.episode_id = episodes.id
+        AND active_jobs.kind = 'episode.process'
+        AND active_jobs.status IN ('queued', 'processing')
+      WHERE episodes.processing_status IN ('pending', 'failed')
+        AND active_jobs.id IS NULL
+      ORDER BY
+        CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
+        ${EPISODE_SORT_MS_SQL} DESC
+      LIMIT ?1`
+    )
+    .bind(limit)
+    .all<{ id: number; feed_id: number; duration: string | null }>();
+
+  return rows.results.map((row) => ({
+    id: row.id,
+    feedId: row.feed_id,
     expectedDurationSeconds: parseEpisodeDurationSeconds(row.duration)
   }));
 }
