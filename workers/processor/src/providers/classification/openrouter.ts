@@ -38,6 +38,9 @@ export function buildAdClassificationPrompt(
     "Return JSON only.",
     "Only include host-read ads, sponsorship reads, promo codes, partner messaging, or explicit product promotions.",
     "Do not include editorial chatter, intro, outro, or self-referential jokes unless clearly promotional.",
+    "When an ad pod is concentrated in one block, prefer the net start and net end of the whole promotional block rather than splitting it into evenly spaced micro-spans.",
+    "Include adjacent ad copy that belongs to the same spot, such as sponsor tags, legal disclaimers, pricing details, URLs, promo codes, and short bridge lines that are still part of the paid read.",
+    "Ad pods often land near round durations such as about 30s, 60s, 90s, 120s, or 180s. Use that only as a weak prior when the transcript supports it, not as a hard rule.",
     "Confidence must be between 0 and 1.",
     "Prefer fewer high-confidence spans over many weak guesses.",
     ...prerollInstructions,
@@ -132,5 +135,7 @@ export async function openRouterClassification(
   env: Env,
   transcript: TranscriptResult
 ): Promise<AdDetectionResult> {
-  return runOpenRouterClassificationModel(env, OPENROUTER_CLASSIFICATION_MODEL, transcript);
+  return runOpenRouterClassificationModel(env, OPENROUTER_CLASSIFICATION_MODEL, transcript, {
+    mentionPrerolls: true
+  });
 }
