@@ -16,12 +16,16 @@ import {
   transcribeWithGroq,
   type TranscriptionResult
 } from "./groq.js";
+import { transcribeWithMistral } from "./mistral.js";
 import { cleanupFile, speedUpAudio } from "./speedup.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
 const GROQ_API_KEYS = process.env.GROQ_API_KEYS ?? "";
 const GATEWAY_TOKEN = process.env.TRANSCRIPTION_GATEWAY_TOKEN ?? "";
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY ?? "";
+const MISTRAL_MODEL = process.env.MISTRAL_MODEL ?? "voxtral-mini-latest";
+const TRANSCRIPTION_PROVIDER = process.env.TRANSCRIPTION_PROVIDER ?? (MISTRAL_API_KEY ? "mistral" : "groq");
 const SPEED_MULTIPLIER = Number(process.env.SPEED_MULTIPLIER) || 2;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
 const groqKeys = parseGroqKeyConfigs(GROQ_API_KEYS, GROQ_API_KEY);
@@ -30,11 +34,26 @@ const groqKeyPool = createGroqKeyPool(groqKeys);
 const app = Fastify({ logger: true, bodyLimit: 200 * 1024 * 1024 });
 await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } });
 
+function resolveConfiguredProvider(): "groq" | "mistral" {
+  switch (TRANSCRIPTION_PROVIDER) {
+    case "groq":
+    case "mistral":
+      return TRANSCRIPTION_PROVIDER;
+    default:
+      throw new Error(`Unsupported TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER}`);
+  }
+}
+
+const configuredProvider = resolveConfiguredProvider();
+
 app.get("/health", async () => ({
   status: "ok",
+  transcription_provider: configuredProvider,
   speed_multiplier: SPEED_MULTIPLIER,
   groq_configured: groqKeys.length > 0,
   groq_key_count: groqKeys.length,
+  mistral_configured: MISTRAL_API_KEY.length > 0,
+  mistral_model: MISTRAL_MODEL,
   gateway_auth_enabled: GATEWAY_TOKEN.length > 0,
 }));
 
@@ -104,18 +123,34 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     speedupMs = Date.now() - speedupStart;
     if (speedAudioPath !== rawAudioPath) filesToCleanup.push(speedAudioPath);
 
-    if (groqKeyPool.size === 0) {
-      return reply.status(500).send({ error: "GROQ_API_KEY or GROQ_API_KEYS is not configured" });
-    }
-
     let result: TranscriptionResult;
 
     try {
-      result = await transcribeWithGroq(
-        speedAudioPath,
-        groqKeyPool,
-        SPEED_MULTIPLIER,
-      );
+      switch (configuredProvider) {
+        case "groq":
+          if (groqKeyPool.size === 0) {
+            return reply.status(500).send({ error: "GROQ_API_KEY or GROQ_API_KEYS is not configured" });
+          }
+
+          result = await transcribeWithGroq(
+            speedAudioPath,
+            groqKeyPool,
+            SPEED_MULTIPLIER,
+          );
+          break;
+        case "mistral":
+          result = await transcribeWithMistral(
+            speedAudioPath,
+            MISTRAL_API_KEY,
+            MISTRAL_MODEL,
+            SPEED_MULTIPLIER
+          );
+          break;
+        default: {
+          const exhaustiveCheck: never = configuredProvider;
+          throw new Error(`Unhandled transcription provider: ${String(exhaustiveCheck)}`);
+        }
+      }
     } catch (error) {
       if (error instanceof GroqRateLimitError) {
         const retryAfterSeconds = error.retryAfterSeconds ?? 60;
@@ -147,7 +182,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
       language: "en",
       x_podads: {
         provider: result.provider,
-        model: "whisper-large-v3-turbo",
+        model: result.model,
         estimated_cost_usd: result.estimatedCostUsd,
         speed_multiplier: SPEED_MULTIPLIER,
         download_ms: downloadMs,

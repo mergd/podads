@@ -21,7 +21,8 @@ export interface TranscriptionResult {
   text: string;
   segments: { id: number; start: number; end: number; text: string }[];
   duration: number;
-  provider: "groq" | "local";
+  provider: "groq" | "mistral";
+  model: string;
   estimatedCostUsd: number | null;
 }
 
@@ -37,6 +38,7 @@ export interface GroqKeyConfig {
 interface GroqKeyState extends GroqKeyConfig {
   cooldownUntil: number;
   inFlight: number;
+  disabled: boolean;
 }
 
 export interface GroqKeyPool {
@@ -53,6 +55,16 @@ export class GroqRateLimitError extends Error {
     this.name = "GroqRateLimitError";
     this.retryAfterSeconds = retryAfterSeconds;
     this.scope = scope;
+  }
+}
+
+export class GroqInvalidKeyError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GroqInvalidKeyError";
+    this.status = status;
   }
 }
 
@@ -113,7 +125,8 @@ export function createGroqKeyPool(configs: GroqKeyConfig[]): GroqKeyPool {
   const states: GroqKeyState[] = configs.map((config) => ({
     ...config,
     cooldownUntil: 0,
-    inFlight: 0
+    inFlight: 0,
+    disabled: false
   }));
 
   return {
@@ -123,41 +136,58 @@ export function createGroqKeyPool(configs: GroqKeyConfig[]): GroqKeyPool {
         throw new Error("GROQ_API_KEY or GROQ_API_KEYS is not configured");
       }
 
-      const now = Date.now();
-      const availableStates = states
-        .filter((state) => state.cooldownUntil <= now)
-        .sort((left, right) => {
-          if (left.inFlight !== right.inFlight) {
-            return left.inFlight - right.inFlight;
+      let lastError: Error | null = null;
+
+      while (true) {
+        const now = Date.now();
+        const availableStates = states
+          .filter((state) => !state.disabled && state.cooldownUntil <= now)
+          .sort((left, right) => {
+            if (left.inFlight !== right.inFlight) {
+              return left.inFlight - right.inFlight;
+            }
+
+            return left.label.localeCompare(right.label);
+          });
+
+        const selectedState = availableStates[0];
+
+        if (!selectedState) {
+          const activeStates = states.filter((state) => !state.disabled);
+          if (activeStates.length === 0) {
+            throw lastError ?? new Error("All configured Groq API keys were rejected.");
           }
 
-          return left.label.localeCompare(right.label);
-        });
-
-      const selectedState = availableStates[0];
-
-      if (!selectedState) {
-        const nextCooldown = Math.min(...states.map((state) => state.cooldownUntil));
-        const retryAfterSeconds = Math.max(1, Math.ceil((nextCooldown - now) / 1000));
-        throw new GroqRateLimitError("All Groq orgs are temporarily cooling down.", retryAfterSeconds, "all-keys");
-      }
-
-      selectedState.inFlight += 1;
-
-      try {
-        return await operation(selectedState);
-      } catch (error) {
-        if (error instanceof GroqRateLimitError) {
-          const retryAfterSeconds = error.retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS;
-          selectedState.cooldownUntil = Math.max(
-            selectedState.cooldownUntil,
-            Date.now() + (retryAfterSeconds * 1000)
-          );
+          const nextCooldown = Math.min(...activeStates.map((state) => state.cooldownUntil));
+          const retryAfterSeconds = Math.max(1, Math.ceil((nextCooldown - now) / 1000));
+          throw new GroqRateLimitError("All Groq orgs are temporarily cooling down.", retryAfterSeconds, "all-keys");
         }
 
-        throw error;
-      } finally {
-        selectedState.inFlight = Math.max(0, selectedState.inFlight - 1);
+        selectedState.inFlight += 1;
+
+        try {
+          return await operation(selectedState);
+        } catch (error) {
+          if (error instanceof GroqRateLimitError) {
+            const retryAfterSeconds = error.retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS;
+            selectedState.cooldownUntil = Math.max(
+              selectedState.cooldownUntil,
+              Date.now() + (retryAfterSeconds * 1000)
+            );
+            lastError = error;
+            continue;
+          }
+
+          if (error instanceof GroqInvalidKeyError) {
+            selectedState.disabled = true;
+            lastError = error;
+            continue;
+          }
+
+          throw error;
+        } finally {
+          selectedState.inFlight = Math.max(0, selectedState.inFlight - 1);
+        }
       }
     }
   };
@@ -194,6 +224,10 @@ async function transcribeChunk(
           parseRetryAfterSeconds(response.headers.get("retry-after"), body) ?? DEFAULT_RETRY_AFTER_SECONDS,
           "single-key"
         );
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new GroqInvalidKeyError(`Groq ${response.status}: ${body}`, response.status);
       }
 
       throw new Error(`Groq ${response.status}: ${body}`);
@@ -269,6 +303,7 @@ export async function transcribeWithGroq(
       segments: allSegments,
       duration,
       provider: "groq",
+      model: "whisper-large-v3-turbo",
       estimatedCostUsd: duration > 0 ? (duration / speedMultiplier / 3600) * 0.04 : 0,
     };
   } finally {

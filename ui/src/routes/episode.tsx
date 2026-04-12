@@ -225,6 +225,7 @@ export function EpisodePage() {
 
           <div className={styles.actions}>
             <InlineAudioPlayer
+              buttonText={hasAdFreeAudio ? "Play ad-free audio" : "Play original audio"}
               className={styles.audioPlayer}
               label={playbackLabel}
               src={playbackUrl}
