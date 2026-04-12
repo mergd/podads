@@ -10,12 +10,10 @@ import multipart from "@fastify/multipart";
 
 import { transcribeWithGroq, type TranscriptionResult } from "./groq.js";
 import { cleanupFile, speedUpAudio } from "./speedup.js";
-import { transcribeLocal } from "./whisper.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
 const GATEWAY_TOKEN = process.env.TRANSCRIPTION_GATEWAY_TOKEN ?? "";
-const WHISPER_MODEL = process.env.WHISPER_MODEL ?? "small.en";
 const SPEED_MULTIPLIER = Number(process.env.SPEED_MULTIPLIER) || 2;
 
 const app = Fastify({ logger: true, bodyLimit: 200 * 1024 * 1024 });
@@ -23,7 +21,6 @@ await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } });
 
 app.get("/health", async () => ({
   status: "ok",
-  model: WHISPER_MODEL,
   speed_multiplier: SPEED_MULTIPLIER,
   groq_configured: GROQ_API_KEY.length > 0,
   gateway_auth_enabled: GATEWAY_TOKEN.length > 0,
@@ -92,19 +89,15 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     speedupMs = Date.now() - speedupStart;
     if (speedAudioPath !== rawAudioPath) filesToCleanup.push(speedAudioPath);
 
-    let result: TranscriptionResult;
-
-    if (GROQ_API_KEY) {
-      try {
-        result = await transcribeWithGroq(speedAudioPath, GROQ_API_KEY, SPEED_MULTIPLIER);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        request.log.warn({ err: msg }, "Groq failed, falling back to local Whisper");
-        result = await transcribeLocal(speedAudioPath, WHISPER_MODEL, SPEED_MULTIPLIER);
-      }
-    } else {
-      result = await transcribeLocal(speedAudioPath, WHISPER_MODEL, SPEED_MULTIPLIER);
+    if (!GROQ_API_KEY) {
+      return reply.status(500).send({ error: "GROQ_API_KEY is not configured" });
     }
+
+    const result: TranscriptionResult = await transcribeWithGroq(
+      speedAudioPath,
+      GROQ_API_KEY,
+      SPEED_MULTIPLIER,
+    );
 
     const elapsed = (Date.now() - start) / 1000;
 
@@ -115,7 +108,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
       language: "en",
       x_podads: {
         provider: result.provider,
-        model: result.provider === "groq" ? "whisper-large-v3-turbo" : WHISPER_MODEL,
+        model: "whisper-large-v3-turbo",
         estimated_cost_usd: result.estimatedCostUsd,
         speed_multiplier: SPEED_MULTIPLIER,
         download_ms: downloadMs,

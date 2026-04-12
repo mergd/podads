@@ -27,7 +27,10 @@
     ],
     "consumers": [
       {
-        "queue": "podads-processing"
+        "queue": "podads-processing",
+        "max_batch_size": 1,
+        "max_retries": 2,
+        "retry_delay": 30
       }
     ]
   },

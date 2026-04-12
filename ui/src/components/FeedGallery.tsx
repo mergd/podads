@@ -20,7 +20,7 @@ export function FeedGallery({ feeds }: FeedGalleryProps) {
         <Link className={styles.viewAll} to="/shows" viewTransition>View all</Link>
       </div>
       <div className={styles.grid}>
-        {feeds.map((feed) => (
+        {feeds.slice(0, 5).map((feed) => (
           <Link className={styles.card} key={feed.slug} state={{ title: feed.title, imageUrl: feed.imageUrl }} to={`/${feed.slug}`} viewTransition>
             <div className={styles.artWrap} style={{ viewTransitionName: `feed-art-${feed.slug}` }}>
               {feed.imageUrl ? (
