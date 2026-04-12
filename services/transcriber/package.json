@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
     "build": "tsc"
   },
   "dependencies": {
@@ -12,7 +12,6 @@
     "@fastify/multipart": "^9.0.0"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "@types/node": "^22.0.0"
   }
