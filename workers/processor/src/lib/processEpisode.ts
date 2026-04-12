@@ -7,7 +7,7 @@ import type { EpisodeJobMessage, EpisodeRecord } from "./types";
 async function loadEpisode(db: D1Database, episodeId: number): Promise<EpisodeRecord | null> {
   const episode = await db
     .prepare(
-      `SELECT id, feed_id, title, source_enclosure_url, source_enclosure_type
+      `SELECT id, feed_id, title, source_enclosure_url, source_enclosure_type, processing_status, processing_details_json
       FROM episodes
       WHERE id = ?1
       LIMIT 1`
@@ -110,20 +110,31 @@ async function putJsonArtifact(
 }
 
 export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): Promise<void> {
-  await markJobProcessing(env.DB, message);
+  const startedAt = Date.now();
   const episode = await loadEpisode(env.DB, message.episodeId);
 
   if (!episode) {
     throw new Error(`Episode ${message.episodeId} could not be loaded.`);
   }
 
+  await markJobProcessing(env.DB, message);
+
   const distinctId = `episode:${episode.id}`;
-  const transcript = await generateTranscript(env, episode.source_enclosure_url);
+  const queueDelayMs = Date.now() - Date.parse(message.enqueuedAt);
+  const transcript = await generateTranscript(env, episode, message.processingVersion, {});
   await capturePostHogEvent(env, distinctId, "transcript_completed", {
     provider: transcript.provider,
     model: transcript.model,
     estimated_cost_usd: transcript.estimatedCostUsd,
     segment_count: transcript.segments.length,
+    input_bytes: transcript.inputBytes,
+    request_duration_ms: transcript.requestDurationMs,
+    provider_queue_delay_ms: transcript.providerQueueDelayMs,
+    provider_execution_ms: transcript.providerExecutionMs,
+    prompt_tokens: transcript.promptTokens,
+    completion_tokens: transcript.completionTokens,
+    total_tokens: transcript.totalTokens,
+    queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
     episode_id: episode.id,
     feed_id: episode.feed_id
   });
@@ -134,12 +145,17 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     model: detection.model,
     estimated_cost_usd: detection.estimatedCostUsd,
     ad_span_count: detection.spans.length,
+    request_duration_ms: detection.requestDurationMs,
+    prompt_tokens: detection.promptTokens,
+    completion_tokens: detection.completionTokens,
+    total_tokens: detection.totalTokens,
     episode_id: episode.id,
     feed_id: episode.feed_id
   });
 
   const transcriptKey = `transcripts/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const adSpansKey = `ad-spans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
+  const splicePlanKey = `splice-plans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
 
   await putJsonArtifact(env.AUDIO_BUCKET, transcriptKey, transcript, {
     episodeId: String(episode.id),
@@ -159,16 +175,45 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     message.processingVersion,
     detection.spans
   );
+  await putJsonArtifact(env.AUDIO_BUCKET, splicePlanKey, audioOutput.manifest, {
+    episodeId: String(episode.id),
+    feedId: String(episode.feed_id)
+  });
 
   const totalEstimatedCost = transcript.estimatedCostUsd + detection.estimatedCostUsd;
+  const removedDurationMs =
+    audioOutput.manifest.sourceDurationMs !== null && audioOutput.manifest.cleanedDurationMs !== null
+      ? audioOutput.manifest.sourceDurationMs - audioOutput.manifest.cleanedDurationMs
+      : null;
   const processingDetails = {
     transcriptProvider: transcript.provider,
     transcriptModel: transcript.model,
+    transcriptAnalysisWindowMs: transcript.analysisWindowMs,
+    transcriptAnalyzedDurationMs: transcript.analyzedDurationMs,
+    transcriptAnalysisTruncated: transcript.analysisTruncated,
+    transcriptInputBytes: transcript.inputBytes ?? null,
+    transcriptRequestDurationMs: transcript.requestDurationMs ?? null,
+    transcriptProviderQueueDelayMs: transcript.providerQueueDelayMs ?? null,
+    transcriptProviderExecutionMs: transcript.providerExecutionMs ?? null,
+    transcriptPromptTokens: transcript.promptTokens ?? null,
+    transcriptCompletionTokens: transcript.completionTokens ?? null,
+    transcriptTotalTokens: transcript.totalTokens ?? null,
     classificationProvider: detection.provider,
     classificationModel: detection.model,
+    classificationRequestDurationMs: detection.requestDurationMs ?? null,
+    classificationPromptTokens: detection.promptTokens ?? null,
+    classificationCompletionTokens: detection.completionTokens ?? null,
+    classificationTotalTokens: detection.totalTokens ?? null,
     totalEstimatedCostUsd: totalEstimatedCost,
     adSpanCount: detection.spans.length,
-    bytesWritten: audioOutput.bytesWritten
+    queueDelayMs: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
+    batchWindowSeconds: message.batchWindowSeconds ?? null,
+    bytesWritten: audioOutput.bytesWritten,
+    audioRewriteMode: audioOutput.manifest.mode,
+    sourceDurationMs: audioOutput.manifest.sourceDurationMs,
+    cleanedDurationMs: audioOutput.manifest.cleanedDurationMs,
+    removedDurationMs,
+    splicePlanKey
   };
 
   await markJobComplete(
@@ -185,7 +230,14 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     feed_id: episode.feed_id,
     bytes_written: audioOutput.bytesWritten,
     total_estimated_cost_usd: totalEstimatedCost,
-    ad_span_count: detection.spans.length
+    ad_span_count: detection.spans.length,
+    audio_rewrite_mode: audioOutput.manifest.mode,
+    removed_duration_ms: removedDurationMs,
+    queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
+    batch_window_seconds: message.batchWindowSeconds ?? null,
+    transcript_provider_queue_delay_ms: transcript.providerQueueDelayMs ?? null,
+    transcript_provider_execution_ms: transcript.providerExecutionMs ?? null,
+    processing_total_ms: Date.now() - startedAt
   });
 }
 
@@ -198,7 +250,8 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_failed", {
       episode_id: message.episodeId,
       feed_id: message.feedId,
-      error: errorMessage
+      error: errorMessage,
+      batch_window_seconds: message.batchWindowSeconds ?? null
     });
     throw error;
   }

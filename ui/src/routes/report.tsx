@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { submitComplaint } from "../lib/api";
 import { captureUiEvent } from "../lib/posthog";
-import type { ComplaintRequest } from "../types/api";
+import type { ComplaintRequest } from "@podads/shared/api";
 import styles from "./report.module.css";
 
 interface ComplaintValues {

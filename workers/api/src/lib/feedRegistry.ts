@@ -12,6 +12,8 @@ import type {
 } from "./types";
 import { hashNormalizedUrl, normalizeFeedUrl, slugFromHash } from "./normalizeFeedUrl";
 
+const D1_BATCH_SIZE = 50;
+
 function parseJsonArray(value: string): string[] {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -47,17 +49,76 @@ function buildEpisodeSummary(
     feedId: row.feed_id,
     feedSlug: row.feed_slug,
     feedTitle: row.feed_title ?? "Untitled podcast",
+    guid: row.guid,
     title: row.title ?? "Untitled episode",
     description: row.description,
+    episodeLink: row.episode_link,
+    author: row.author,
     pubDate: row.pub_date,
     duration: row.duration,
     imageUrl: row.image_url,
     sourceEnclosureUrl: row.source_enclosure_url,
+    sourceEnclosureType: row.source_enclosure_type,
+    sourceEnclosureLength: row.source_enclosure_length,
     cleanedEnclosureUrl: row.cleaned_enclosure_key ? `${baseUrl}/audio/${row.feed_slug}/${row.id}.mp3` : null,
     processingStatus: row.processing_status,
     lastError: row.last_error,
     reportUrl: `${baseUrl}/report?feed=${encodeURIComponent(row.feed_slug)}&episode=${row.id}`
   };
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+function parseEpisodeDurationSeconds(duration: string | null): number | undefined {
+  if (!duration) {
+    return undefined;
+  }
+
+  const trimmed = duration.trim();
+
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : undefined;
+  }
+
+  const parts = trimmed.split(":").map((part) => Number(part));
+
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return undefined;
+  }
+
+  if (parts.length === 2) {
+    const minutes = parts[0];
+    const seconds = parts[1];
+
+    if (minutes === undefined || seconds === undefined) {
+      return undefined;
+    }
+
+    return minutes * 60 + seconds;
+  }
+
+  const hours = parts[0];
+  const minutes = parts[1];
+  const seconds = parts[2];
+
+  if (hours === undefined || minutes === undefined || seconds === undefined) {
+    return undefined;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
 export async function getFeedBySlug(db: D1Database, slug: string): Promise<FeedRow | null> {
@@ -164,12 +225,10 @@ export async function upsertEpisodes(
   feedId: number,
   source: SourceFeed,
   processingVersion: string
-): Promise<number[]> {
-  const queuedEpisodeIds: number[] = [];
-
-  for (const episode of source.episodes) {
-    const now = new Date().toISOString();
-    await db
+): Promise<void> {
+  const now = new Date().toISOString();
+  const statements = source.episodes.map((episode) =>
+    db
       .prepare(
         `INSERT INTO episodes (
           feed_id,
@@ -220,32 +279,76 @@ export async function upsertEpisodes(
         processingVersion,
         now
       )
-      .run();
+  );
 
-    const row = await db
-      .prepare("SELECT id, processing_status, cleaned_enclosure_key FROM episodes WHERE feed_id = ?1 AND episode_key = ?2 LIMIT 1")
-      .bind(feedId, episode.episodeKey)
-      .first<{ id: number; processing_status: EpisodeProcessingStatus; cleaned_enclosure_key: string | null }>();
+  for (const chunk of chunkArray(statements, D1_BATCH_SIZE)) {
+    await db.batch(chunk);
+  }
+}
 
-    if (!row) {
-      continue;
-    }
-
-    if (row.processing_status === "pending" || row.processing_status === "failed") {
-      queuedEpisodeIds.push(row.id);
-    }
+export async function selectEpisodesForProcessing(
+  db: D1Database,
+  feedId: number,
+  limit: number
+): Promise<Array<{ id: number; expectedDurationSeconds?: number }>> {
+  if (limit <= 0) {
+    return [];
   }
 
-  return queuedEpisodeIds;
+  const rows = await db
+    .prepare(
+      `SELECT episodes.id, episodes.duration
+      FROM episodes
+      LEFT JOIN jobs AS active_jobs
+        ON active_jobs.episode_id = episodes.id
+        AND active_jobs.kind = 'episode.process'
+        AND active_jobs.status IN ('queued', 'processing')
+      WHERE episodes.feed_id = ?1
+        AND episodes.processing_status IN ('pending', 'failed')
+        AND active_jobs.id IS NULL
+      ORDER BY
+        CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
+        COALESCE(episodes.pub_date, episodes.updated_at, episodes.created_at) DESC
+      LIMIT ?2`
+    )
+    .bind(feedId, limit)
+    .all<{ id: number; duration: string | null }>();
+
+  return rows.results.map((row) => ({
+    id: row.id,
+    expectedDurationSeconds: parseEpisodeDurationSeconds(row.duration)
+  }));
+}
+
+export async function countActiveEpisodeJobs(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM jobs
+      WHERE kind = 'episode.process'
+        AND status IN ('queued', 'processing')`
+    )
+    .first<{ count: number | string }>();
+
+  const count = Number(row?.count ?? 0);
+  return Number.isFinite(count) ? count : 0;
 }
 
 export async function enqueueEpisodeJobs(
   db: D1Database,
   queue: Queue,
-  messages: EpisodeQueueMessage[]
+  messages: EpisodeQueueMessage[],
+  options?: {
+    delaySeconds?: number;
+  }
 ): Promise<void> {
-  for (const message of messages) {
-    await db
+  if (messages.length === 0) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const statements = messages.map((message) =>
+    db
       .prepare(
         `INSERT OR REPLACE INTO jobs (
           id,
@@ -258,11 +361,21 @@ export async function enqueueEpisodeJobs(
           updated_at
         ) VALUES (?1, 'episode.process', ?2, ?3, 'queued', 0, ?4, ?5)`
       )
-      .bind(message.jobId, message.feedId, message.episodeId, JSON.stringify(message), new Date().toISOString())
-      .run();
+      .bind(message.jobId, message.feedId, message.episodeId, JSON.stringify(message), now)
+  );
+
+  for (const chunk of chunkArray(statements, D1_BATCH_SIZE)) {
+    await db.batch(chunk);
   }
 
-  await queue.sendBatch(messages.map((message) => ({ body: message })));
+  for (const chunk of chunkArray(messages, D1_BATCH_SIZE)) {
+    await queue.sendBatch(
+      chunk.map((message) => ({
+        body: message,
+        ...(options?.delaySeconds ? { delaySeconds: options.delaySeconds } : {})
+      }))
+    );
+  }
 }
 
 export async function getHomeData(db: D1Database, baseUrl: string): Promise<HomeResponse> {

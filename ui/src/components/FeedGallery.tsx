@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-import type { FeedSummary } from "../types/api";
+import type { FeedSummary } from "@podads/shared/api";
 import styles from "./FeedGallery.module.css";
 
 interface FeedGalleryProps {

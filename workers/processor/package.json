@@ -8,5 +8,12 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types"
+  },
+  "dependencies": {
+    "@podads/shared": "workspace:*",
+    "mp3-parser": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2"
   }
 }

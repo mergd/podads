@@ -1,5 +1,17 @@
-export type FeedStatus = "pending" | "ready" | "error";
-export type EpisodeProcessingStatus = "pending" | "processing" | "ready" | "failed";
+import type { EpisodeProcessingStatus, FeedStatus } from "@podads/shared/api";
+
+export type {
+  ComplaintRequest,
+  EpisodeProcessingStatus,
+  EpisodeSummary,
+  FeedDetailResponse,
+  FeedStatus,
+  FeedSummary,
+  HomeResponse,
+  RegisterFeedRequest,
+  RegisterFeedResponse
+} from "@podads/shared/api";
+export type { EpisodeQueueMessage } from "@podads/shared/queue";
 
 export interface FeedRow {
   id: number;
@@ -49,67 +61,6 @@ export interface EpisodeRow {
   updated_at: string;
 }
 
-export interface FeedSummary {
-  id: number;
-  slug: string;
-  sourceUrl: string;
-  title: string;
-  description: string | null;
-  siteLink: string | null;
-  imageUrl: string | null;
-  author: string | null;
-  language: string | null;
-  categories: string[];
-  status: FeedStatus;
-  lastRefreshedAt: string | null;
-}
-
-export interface EpisodeSummary {
-  id: number;
-  feedId: number;
-  feedSlug: string;
-  feedTitle: string;
-  title: string;
-  description: string | null;
-  pubDate: string | null;
-  duration: string | null;
-  imageUrl: string | null;
-  sourceEnclosureUrl: string;
-  cleanedEnclosureUrl: string | null;
-  processingStatus: EpisodeProcessingStatus;
-  lastError: string | null;
-  reportUrl: string;
-}
-
-export interface HomeResponse {
-  latestEpisodes: EpisodeSummary[];
-  feeds: FeedSummary[];
-}
-
-export interface FeedDetailResponse {
-  feed: FeedSummary;
-  episodes: EpisodeSummary[];
-  proxiedFeedUrl: string;
-}
-
-export interface RegisterFeedRequest {
-  url: string;
-}
-
-export interface RegisterFeedResponse {
-  created: boolean;
-  proxiedFeedUrl: string;
-  feed: FeedSummary;
-}
-
-export interface ComplaintRequest {
-  feedSlug?: string;
-  episodeId?: number;
-  email?: string;
-  issueType: "bad_cut" | "missed_ad" | "metadata_issue" | "other";
-  message: string;
-}
-
 export interface SourceEpisode {
   episodeKey: string;
   guid: string | null;
@@ -135,12 +86,4 @@ export interface SourceFeed {
   categories: string[];
   metadata: Record<string, unknown>;
   episodes: SourceEpisode[];
-}
-
-export interface EpisodeQueueMessage {
-  type: "episode.process";
-  jobId: string;
-  feedId: number;
-  episodeId: number;
-  processingVersion: string;
 }

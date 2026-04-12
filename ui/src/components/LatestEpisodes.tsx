@@ -1,5 +1,5 @@
 import styles from "./LatestEpisodes.module.css";
-import type { EpisodeSummary } from "../types/api";
+import type { EpisodeSummary } from "@podads/shared/api";
 
 interface LatestEpisodesProps {
   episodes: EpisodeSummary[];

@@ -16,12 +16,16 @@ async function dispatchMessage(env: Env, message: EpisodeJobMessage): Promise<vo
 }
 
 export default {
+  async fetch(): Promise<Response> {
+    return new Response("ok", { status: 200 });
+  },
+
   async queue(batch: MessageBatch<EpisodeJobMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
         await dispatchMessage(env, message.body as EpisodeJobMessage);
         message.ack();
-      } catch {
+      } catch (error) {
         message.retry();
       }
     }

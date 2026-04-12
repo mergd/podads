@@ -2,6 +2,9 @@
   "name": "podads-processor",
   "main": "src/queue.ts",
   "compatibility_date": "2026-04-06",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -16,6 +19,12 @@
     }
   ],
   "queues": {
+    "producers": [
+      {
+        "binding": "PROCESSING_QUEUE",
+        "queue": "podads-processing"
+      }
+    ],
     "consumers": [
       {
         "queue": "podads-processing"
@@ -25,10 +34,10 @@
   "vars": {
     "APP_BASE_URL": "http://localhost:8787",
     "PROCESSING_VERSION": "v1",
-    "TRANSCRIPTION_PROVIDER": "mock",
-    "CLASSIFICATION_PROVIDER": "mock",
-    "TRANSCRIPTION_MODEL": "mock-transcribe-v1",
-    "CLASSIFICATION_MODEL": "mock-classifier-v1",
+    "CLASSIFICATION_PROVIDER": "openrouter",
+    "CLASSIFICATION_MODEL": "openai/gpt-4.1-nano",
+    "TRANSCRIPTION_GATEWAY_URL": "https://transcriber-production-e6f9.up.railway.app",
+    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
     "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "observability": {

@@ -5,7 +5,7 @@ import { FeedGallery } from "../components/FeedGallery";
 import { LatestEpisodes } from "../components/LatestEpisodes";
 import { fetchHome, registerFeed } from "../lib/api";
 import { captureUiEvent } from "../lib/posthog";
-import type { HomeResponse, RegisterFeedResponse } from "../types/api";
+import type { HomeResponse, RegisterFeedResponse } from "@podads/shared/api";
 import styles from "./index.module.css";
 
 export function HomePage() {

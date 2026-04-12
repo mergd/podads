@@ -6,7 +6,8 @@
     {
       "binding": "DB",
       "database_name": "podads",
-      "database_id": "725b5729-8e37-45b3-a847-b503a95854f9"
+      "database_id": "725b5729-8e37-45b3-a847-b503a95854f9",
+      "migrations_dir": "./schema"
     }
   ],
   "r2_buckets": [
@@ -27,6 +28,9 @@
     "APP_BASE_URL": "http://localhost:8787",
     "PUBLIC_UI_BASE_URL": "http://localhost:5173",
     "PROCESSING_VERSION": "v1",
+    "MAX_EPISODES_PER_FEED_REFRESH": "1",
+    "MAX_CONCURRENT_PROCESSING_JOBS": "1",
+    "PROCESSING_BATCH_WINDOW_SECONDS": "1800",
     "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "triggers": {

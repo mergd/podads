@@ -10,7 +10,7 @@ import {
 } from "./lib/feedRegistry";
 import { capturePostHogEvent } from "./lib/posthog";
 import { buildProxiedRssXml } from "./lib/rss";
-import type { ComplaintRequest, RegisterFeedRequest } from "./lib/types";
+import type { ComplaintRequest, RegisterFeedRequest } from "@podads/shared/api";
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",

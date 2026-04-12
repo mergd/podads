@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { fetchFeed } from "../lib/api";
 import { captureUiEvent } from "../lib/posthog";
-import type { FeedDetailResponse } from "../types/api";
+import type { FeedDetailResponse } from "@podads/shared/api";
 import styles from "./feed.module.css";
 
 export function FeedPage() {
@@ -80,6 +80,11 @@ export function FeedPage() {
               <a href={episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl} rel="noreferrer" target="_blank">
                 Open audio
               </a>
+              {episode.episodeLink ? (
+                <a href={episode.episodeLink} rel="noreferrer" target="_blank">
+                  Open episode page
+                </a>
+              ) : null}
               <a className={styles.reportLink} href={episode.reportUrl}>
                 Report issue
               </a>

@@ -162,14 +162,21 @@ export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[]
   const items = episodes
     .map((episode) => {
       const enclosureUrl = episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl;
+      const enclosureType = episode.sourceEnclosureType ?? "audio/mpeg";
+      const enclosureLength = episode.sourceEnclosureLength
+        ? ` length="${escapeXml(episode.sourceEnclosureLength)}"`
+        : "";
+      const itemLink = episode.episodeLink ?? enclosureUrl;
+      const guid = episode.guid ?? episode.sourceEnclosureUrl ?? String(episode.id);
 
-      return `<item>${renderOptionalTag("title", episode.title)}${renderOptionalTag("description", episode.description)}${renderOptionalTag("link", episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl)}${renderOptionalTag("guid", String(episode.id))}${renderOptionalTag("pubDate", episode.pubDate)}${renderOptionalTag("itunes:duration", episode.duration)}${episode.imageUrl ? `<itunes:image href="${escapeXml(episode.imageUrl)}" />` : ""}<enclosure url="${escapeXml(enclosureUrl)}" type="audio/mpeg" />${renderOptionalTag("podads:reportUrl", episode.reportUrl)}${renderOptionalTag("podads:status", episode.processingStatus)}</item>`;
+      return `<item>${renderOptionalTag("title", episode.title)}${renderOptionalTag("description", episode.description)}${renderOptionalTag("link", itemLink)}${renderOptionalTag("guid", guid)}${renderOptionalTag("author", episode.author)}${renderOptionalTag("itunes:author", episode.author)}${renderOptionalTag("pubDate", episode.pubDate)}${renderOptionalTag("itunes:duration", episode.duration)}${episode.imageUrl ? `<itunes:image href="${escapeXml(episode.imageUrl)}" />` : ""}<enclosure url="${escapeXml(enclosureUrl)}" type="${escapeXml(enclosureType)}"${enclosureLength} />${renderOptionalTag("podads:reportUrl", episode.reportUrl)}${renderOptionalTag("podads:status", episode.processingStatus)}</item>`;
     })
     .join("");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podads="https://podads.app/ns/1.0">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podads="https://podads.app/ns/1.0">
   <channel>
+    <atom:link href="${escapeXml(proxiedFeedUrl)}" rel="self" type="application/rss+xml" />
     ${renderOptionalTag("title", feed.title)}
     ${renderOptionalTag("description", feed.description)}
     ${renderOptionalTag("link", feed.siteLink)}
@@ -177,7 +184,7 @@ export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[]
     ${renderOptionalTag("itunes:author", feed.author)}
     ${categories}
     ${imageTag}
-    ${renderOptionalTag("podads:source", proxiedFeedUrl)}
+    ${renderOptionalTag("podads:source", feed.sourceUrl)}
     ${items}
   </channel>
 </rss>`;

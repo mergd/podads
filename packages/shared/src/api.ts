@@ -21,12 +21,17 @@ export interface EpisodeSummary {
   feedId: number;
   feedSlug: string;
   feedTitle: string;
+  guid: string | null;
   title: string;
   description: string | null;
+  episodeLink: string | null;
+  author: string | null;
   pubDate: string | null;
   duration: string | null;
   imageUrl: string | null;
   sourceEnclosureUrl: string;
+  sourceEnclosureType: string | null;
+  sourceEnclosureLength: string | null;
   cleanedEnclosureUrl: string | null;
   processingStatus: EpisodeProcessingStatus;
   lastError: string | null;
@@ -42,6 +47,10 @@ export interface FeedDetailResponse {
   feed: FeedSummary;
   episodes: EpisodeSummary[];
   proxiedFeedUrl: string;
+}
+
+export interface RegisterFeedRequest {
+  url: string;
 }
 
 export interface RegisterFeedResponse {

@@ -1,6 +1,9 @@
 declare global {
   interface Env {
-    POSTHOG_PROJECT_API_KEY: string;
+    TRANSCRIPTION_GATEWAY_URL: string;
+    TRANSCRIPTION_GATEWAY_TOKEN?: string;
+    OPENROUTER_API_KEY: string;
+    PROCESSING_QUEUE: Queue;
   }
 }
 

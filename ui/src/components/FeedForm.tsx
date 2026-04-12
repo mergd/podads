@@ -1,7 +1,7 @@
 import { Button, Field, Form, Input } from "@base-ui/react";
 
 import { captureUiEvent } from "../lib/posthog";
-import type { RegisterFeedResponse } from "../types/api";
+import type { RegisterFeedResponse } from "@podads/shared/api";
 import styles from "./FeedForm.module.css";
 
 interface FeedFormProps {

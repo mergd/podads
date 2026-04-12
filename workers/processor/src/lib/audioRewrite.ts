@@ -1,4 +1,5 @@
-import type { AdSpan } from "./types";
+import { canSpliceMp3, spliceMp3Audio } from "./mp3Surgery";
+import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
 function extensionFromContentType(contentType: string | null): string {
   switch (contentType) {
@@ -21,7 +22,7 @@ export async function rewriteAudio(
   episodeId: number,
   processingVersion: string,
   adSpans: AdSpan[]
-): Promise<{ key: string; bytesWritten: number }> {
+): Promise<AudioRewriteResult> {
   const response = await fetch(sourceUrl, {
     headers: {
       "user-agent": "podads-bot/0.1"
@@ -36,19 +37,47 @@ export async function rewriteAudio(
   const extension = extensionFromContentType(contentType);
   const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extension}`;
   const arrayBuffer = await response.arrayBuffer();
+  let bytes: ArrayBuffer | ArrayBufferView = arrayBuffer;
+  let manifest: AudioRewriteManifest = {
+    mode: "passthrough",
+    sourceContentType: contentType,
+    sourceDurationMs: null,
+    cleanedDurationMs: null,
+    requestedRemovedRanges: adSpans.map((span) => ({
+      startMs: span.startMs,
+      endMs: span.endMs
+    })),
+    actualRemovedRanges: [],
+    retainedRanges: [],
+    frameCount: null,
+    keptFrameCount: null,
+    notes: []
+  };
 
-  await env.AUDIO_BUCKET.put(key, arrayBuffer, {
+  if (adSpans.length === 0) {
+    manifest.notes.push("Skipped audio surgery because no ad spans were detected.");
+  } else if (!canSpliceMp3(contentType)) {
+    manifest.notes.push(`Skipped audio surgery because ${contentType} is not yet supported for frame-level splicing.`);
+  } else {
+    const rewritten = spliceMp3Audio(arrayBuffer, contentType, adSpans);
+    bytes = rewritten.bytes;
+    manifest = rewritten.manifest;
+  }
+
+  await env.AUDIO_BUCKET.put(key, bytes, {
     httpMetadata: {
       contentType
     },
     customMetadata: {
       adSpanCount: String(adSpans.length),
-      processingVersion
+      processingVersion,
+      rewriteMode: manifest.mode
     }
   });
 
   return {
     key,
-    bytesWritten: arrayBuffer.byteLength
+    bytesWritten: bytes.byteLength,
+    manifest
   };
 }

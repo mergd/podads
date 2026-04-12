@@ -1,14 +1,16 @@
 import { mockClassification } from "../providers/classification/mock";
+import { openRouterClassification } from "../providers/classification/openrouter";
 import type { AdDetectionResult, AdSpan, TranscriptResult } from "./types";
 
-type ClassificationProvider = "mock";
+type ClassificationProvider = "mock" | "openrouter";
+const SNAP_WINDOW_MS = 5_000;
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled classification provider: ${value}`);
 }
 
 function snapToNearestGap(target: number, transcript: TranscriptResult, mode: "start" | "end"): number {
-  const nearbySegments = transcript.segments.filter((segment) => Math.abs(segment.startMs - target) <= 10_000);
+  const nearbySegments = transcript.segments.filter((segment) => Math.abs(segment.startMs - target) <= SNAP_WINDOW_MS);
   const candidates = nearbySegments.map((segment) => (mode === "start" ? segment.startMs : segment.endMs));
 
   if (candidates.length === 0) {
@@ -35,6 +37,9 @@ export async function detectAdSpans(env: Env, transcript: TranscriptResult): Pro
   switch (provider) {
     case "mock":
       result = await mockClassification(env.CLASSIFICATION_MODEL, transcript.segments);
+      break;
+    case "openrouter":
+      result = await openRouterClassification(env, env.CLASSIFICATION_MODEL, transcript);
       break;
     default:
       result = assertNever(provider);
