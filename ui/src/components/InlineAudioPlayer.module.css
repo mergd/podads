@@ -75,7 +75,7 @@
   animation: spin 0.8s linear infinite;
 }
 
-/* -- seek bar -- */
+/* -- seek bar with visible thumb -- */
 
 .track {
   position: relative;
@@ -83,7 +83,6 @@
   height: 4px;
   border-radius: 2px;
   background: var(--color-bg-inset);
-  overflow: hidden;
 }
 
 .trackFill {
@@ -98,15 +97,89 @@
 
 .seekInput {
   position: absolute;
-  inset: -6px 0;
+  inset: 0;
   width: 100%;
-  height: calc(100% + 12px);
+  height: 100%;
   margin: 0;
   padding: 0;
-  opacity: 0;
+  background: transparent;
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
+}
+
+.seekInput::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+  border-radius: 2px;
+}
+
+.seekInput::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--color-accent);
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.seekInput::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: var(--shadow-md);
+}
+
+.seekInput::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.15);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.seekInput::-moz-range-track {
+  height: 4px;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+}
+
+.seekInput::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-accent);
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.seekInput::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: var(--shadow-md);
+}
+
+.seekInput::-moz-range-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.15);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.seekInput:focus-visible {
+  outline: none;
+}
+
+.seekInput:focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--shadow-focus);
+}
+
+.seekInput:focus-visible::-moz-range-thumb {
+  box-shadow: var(--shadow-focus);
 }
 
 /* -- time label -- */
@@ -118,4 +191,32 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
+}
+
+/* -- playback rate toggle -- */
+
+.rateButton {
+  flex-shrink: 0;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-soft);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color 100ms ease, border-color 100ms ease, background 100ms ease;
+  user-select: none;
+}
+
+.rateButton:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.rateButton[data-active="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
 }

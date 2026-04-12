@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "wrangler deploy --dry-run",
+    "compare-models": "bun run src/compareAdModels.ts",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types"

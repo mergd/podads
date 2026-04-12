@@ -5,6 +5,8 @@ import styles from "./InlineAudioPlayer.module.css";
 
 type PlaybackState = "idle" | "loading" | "playing" | "paused";
 
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const;
+
 interface InlineAudioPlayerProps {
   buttonText?: string;
   className?: string;
@@ -14,9 +16,17 @@ interface InlineAudioPlayerProps {
 }
 
 function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatRate(rate: number): string {
+  return rate === 1 ? "1x" : `${rate}x`;
 }
 
 export function InlineAudioPlayer({ buttonText, className, label, src, type }: InlineAudioPlayerProps) {
@@ -24,6 +34,8 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
   const [state, setState] = useState<PlaybackState>("idle");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [rate, setRate] = useState(1);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   const handleToggle = useCallback(() => {
     const audio = audioRef.current;
@@ -46,37 +58,44 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
     }
   }, [state]);
 
-  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSeekStart = useCallback(() => {
+    setIsSeeking(true);
+  }, []);
+
+  const handleSeekInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
+    setCurrentTime(Number(e.currentTarget.value));
+  }, []);
+
+  const handleSeekEnd = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const audio = audioRef.current;
-    if (!audio || !duration) return;
-    audio.currentTime = Number(e.target.value);
-  }, [duration]);
+    if (audio) {
+      audio.currentTime = Number(e.target.value);
+    }
+    setIsSeeking(false);
+  }, []);
+
+  const handleCycleRate = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const idx = PLAYBACK_RATES.indexOf(rate as (typeof PLAYBACK_RATES)[number]);
+    const next = PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length];
+    audio.playbackRate = next;
+    setRate(next);
+  }, [rate]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    function onPlay() {
-      setState("playing");
-    }
-    function onPause() {
-      setState("paused");
-    }
-    function onWaiting() {
-      setState("loading");
-    }
-    function onPlaying() {
-      setState("playing");
-    }
+    function onPlay() { setState("playing"); }
+    function onPause() { setState("paused"); }
+    function onWaiting() { setState("loading"); }
+    function onPlaying() { setState("playing"); }
     function onTimeUpdate() {
-      setCurrentTime(audio!.currentTime);
+      if (!isSeeking) setCurrentTime(audio!.currentTime);
     }
-    function onLoadedMetadata() {
-      setDuration(audio!.duration);
-    }
-    function onEnded() {
-      setState("paused");
-    }
+    function onLoadedMetadata() { setDuration(audio!.duration); }
+    function onEnded() { setState("paused"); }
 
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
@@ -95,7 +114,7 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
       audio.removeEventListener("ended", onEnded);
     };
-  }, []);
+  }, [isSeeking]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const isActive = state !== "idle";
@@ -140,7 +159,10 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
             className={styles.seekInput}
             max={duration || 0}
             min={0}
-            onChange={handleSeek}
+            onChange={handleSeekEnd}
+            onInput={handleSeekInput}
+            onMouseDown={handleSeekStart}
+            onTouchStart={handleSeekStart}
             step={0.1}
             type="range"
             value={currentTime}
@@ -151,6 +173,16 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
           {formatTime(currentTime)}
           {duration > 0 ? ` / ${formatTime(duration)}` : ""}
         </span>
+
+        <button
+          aria-label={`Playback speed ${formatRate(rate)}`}
+          className={styles.rateButton}
+          data-active={rate !== 1}
+          onClick={handleCycleRate}
+          type="button"
+        >
+          {formatRate(rate)}
+        </button>
       </div>
 
       <audio ref={audioRef} preload="none">
