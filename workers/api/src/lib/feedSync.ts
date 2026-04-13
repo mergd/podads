@@ -12,7 +12,7 @@ import { capturePostHogEvent } from "./posthog";
 import { parseSourceFeed } from "./rss";
 import type { FeedRow, SourceFeed } from "./types";
 
-function getMaxEpisodesPerRefresh(env: Env): number {
+function getMaxEpisodesOnInitialRefresh(env: Env): number {
   const parsed = Number.parseInt(env.MAX_EPISODES_PER_FEED_REFRESH, 10);
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -22,7 +22,7 @@ function getMaxEpisodesPerRefresh(env: Env): number {
   return parsed;
 }
 
-function getMaxProcessableEpisodesPerFeed(env: Env): number {
+function getMaxProcessableEpisodesOnInitialRefresh(env: Env): number {
   const parsed = Number.parseInt(env.MAX_PROCESSABLE_EPISODES_PER_FEED, 10);
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -33,12 +33,19 @@ function getMaxProcessableEpisodesPerFeed(env: Env): number {
 }
 
 export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
+  const isInitialRefresh = feed.last_refreshed_at === null;
   const source = await fetchSourceFeed(feed.source_url);
   await updateFeedFromSource(env.DB, feed.id, source);
   await upsertEpisodes(env.DB, feed.id, source, env.PROCESSING_VERSION);
-  await markExcessEpisodesSkipped(env.DB, feed.id, getMaxProcessableEpisodesPerFeed(env));
+  if (isInitialRefresh) {
+    await markExcessEpisodesSkipped(env.DB, feed.id, getMaxProcessableEpisodesOnInitialRefresh(env));
+  }
 
-  const episodesToProcess = await selectEpisodesForProcessing(env.DB, feed.id, getMaxEpisodesPerRefresh(env));
+  const episodesToProcess = await selectEpisodesForProcessing(
+    env.DB,
+    feed.id,
+    isInitialRefresh ? getMaxEpisodesOnInitialRefresh(env) : undefined
+  );
   const enqueuedAt = new Date().toISOString();
   const messages: EpisodeQueueMessage[] = episodesToProcess.map((episode) => ({
     type: "episode.process",

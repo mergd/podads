@@ -562,15 +562,26 @@ export async function markExcessEpisodesSkipped(
 export async function selectEpisodesForProcessing(
   db: D1Database,
   feedId: number,
-  limit: number
+  limit?: number
 ): Promise<Array<{ id: number; expectedDurationSeconds?: number }>> {
-  if (limit <= 0) {
+  if (limit !== undefined && limit <= 0) {
     return [];
   }
 
-  const rows = await db
-    .prepare(
-      `SELECT episodes.id, episodes.duration
+  const query = limit === undefined
+    ? `SELECT episodes.id, episodes.duration
+      FROM episodes
+      LEFT JOIN jobs AS active_jobs
+        ON active_jobs.episode_id = episodes.id
+        AND active_jobs.kind = 'episode.process'
+        AND active_jobs.status IN ('queued', 'processing')
+      WHERE episodes.feed_id = ?1
+        AND episodes.processing_status IN ('pending', 'failed')
+        AND active_jobs.id IS NULL
+      ORDER BY
+        CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
+        ${EPISODE_SORT_MS_SQL} DESC`
+    : `SELECT episodes.id, episodes.duration
       FROM episodes
       LEFT JOIN jobs AS active_jobs
         ON active_jobs.episode_id = episodes.id
@@ -582,10 +593,12 @@ export async function selectEpisodesForProcessing(
       ORDER BY
         CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
         ${EPISODE_SORT_MS_SQL} DESC
-      LIMIT ?2`
-    )
-    .bind(feedId, limit)
-    .all<{ id: number; duration: string | null }>();
+      LIMIT ?2`;
+
+  const statement = db.prepare(query);
+  const rows = limit === undefined
+    ? await statement.bind(feedId).all<{ id: number; duration: string | null }>()
+    : await statement.bind(feedId, limit).all<{ id: number; duration: string | null }>();
 
   return rows.results.map((row) => ({
     id: row.id,
