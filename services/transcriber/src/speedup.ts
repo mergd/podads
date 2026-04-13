@@ -1,24 +1,45 @@
 import { execFile } from "node:child_process";
-import { unlink } from "node:fs/promises";
+import { stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ = 16_000;
+const TRANSCRIPTION_AUDIO_BITRATE = "24k";
 
-export async function speedUpAudio(inputPath: string, multiplier: number): Promise<string> {
-  if (multiplier <= 1) return inputPath;
+export async function getFileSizeBytes(path: string): Promise<number> {
+  return (await stat(path)).size;
+}
 
-  const outputPath = join(tmpdir(), `speedup-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
-
-  await execFileAsync("ffmpeg", [
+export async function prepareAudioForTranscription(
+  inputPath: string,
+  multiplier: number,
+  analysisWindowMs: number | null
+): Promise<string> {
+  const outputPath = join(tmpdir(), `prepared-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
+  const ffmpegArgs = [
     "-y",
     "-i", inputPath,
-    "-filter:a", `atempo=${multiplier}`,
-    "-q:a", "4",
+    "-vn",
+  ];
+
+  if (analysisWindowMs !== null) {
+    ffmpegArgs.push("-t", String(analysisWindowMs / 1000));
+  }
+
+  if (multiplier > 1) {
+    ffmpegArgs.push("-filter:a", `atempo=${multiplier}`);
+  }
+
+  ffmpegArgs.push(
+    "-ar", String(TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ),
     "-ac", "1",
+    "-b:a", TRANSCRIPTION_AUDIO_BITRATE,
     outputPath,
-  ], { timeout: 120_000 });
+  );
+
+  await execFileAsync("ffmpeg", ffmpegArgs, { timeout: 120_000 });
 
   return outputPath;
 }

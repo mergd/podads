@@ -17,7 +17,7 @@ import {
   type TranscriptionResult
 } from "./groq.js";
 import { MistralRetryableError, transcribeWithMistral } from "./mistral.js";
-import { cleanupFile, speedUpAudio } from "./speedup.js";
+import { cleanupFile, getFileSizeBytes, prepareAudioForTranscription } from "./speedup.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
@@ -125,8 +125,10 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
   const start = Date.now();
   const filesToCleanup: string[] = [];
   let downloadMs: number | undefined;
-  let speedupMs: number | undefined;
+  let prepareMs: number | undefined;
   let analysisWindowMs: number | null = null;
+  let sourceInputBytes: number | undefined;
+  let preparedInputBytes: number | undefined;
 
   try {
     let rawAudioPath: string;
@@ -147,11 +149,15 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
       downloadMs = Date.now() - downloadStart;
     }
     filesToCleanup.push(rawAudioPath);
+    sourceInputBytes = await getFileSizeBytes(rawAudioPath);
 
-    const speedupStart = Date.now();
-    const speedAudioPath = await speedUpAudio(rawAudioPath, SPEED_MULTIPLIER);
-    speedupMs = Date.now() - speedupStart;
-    if (speedAudioPath !== rawAudioPath) filesToCleanup.push(speedAudioPath);
+    const prepareStart = Date.now();
+    const preparedAudioPath = await prepareAudioForTranscription(rawAudioPath, SPEED_MULTIPLIER, analysisWindowMs);
+    prepareMs = Date.now() - prepareStart;
+    if (preparedAudioPath !== rawAudioPath) {
+      filesToCleanup.push(preparedAudioPath);
+    }
+    preparedInputBytes = await getFileSizeBytes(preparedAudioPath);
 
     let result: TranscriptionResult;
 
@@ -159,7 +165,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
       if (groqKeyPool.size > 0) {
         try {
           result = await transcribeWithGroq(
-            speedAudioPath,
+            preparedAudioPath,
             groqKeyPool,
             SPEED_MULTIPLIER,
           );
@@ -184,7 +190,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
           }
 
           result = await transcribeWithMistral(
-            speedAudioPath,
+            preparedAudioPath,
             MISTRAL_API_KEY,
             MISTRAL_MODEL,
             SPEED_MULTIPLIER
@@ -192,7 +198,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         }
       } else if (MISTRAL_API_KEY) {
         result = await transcribeWithMistral(
-          speedAudioPath,
+          preparedAudioPath,
           MISTRAL_API_KEY,
           MISTRAL_MODEL,
           SPEED_MULTIPLIER
@@ -246,7 +252,9 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         estimated_cost_usd: result.estimatedCostUsd,
         speed_multiplier: SPEED_MULTIPLIER,
         download_ms: downloadMs,
-        speedup_ms: speedupMs,
+        prepare_ms: prepareMs,
+        source_input_bytes: sourceInputBytes,
+        prepared_input_bytes: preparedInputBytes,
         analysis_window_ms: analysisWindowMs,
         analysis_truncated: truncated.analysisTruncated,
         transcribe_seconds: Math.round(elapsed * 100) / 100,

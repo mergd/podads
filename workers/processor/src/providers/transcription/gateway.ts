@@ -20,7 +20,9 @@ interface GatewayResponse {
     estimated_cost_usd?: number | null;
     speed_multiplier?: number;
     download_ms?: number;
-    speedup_ms?: number;
+    prepare_ms?: number;
+    source_input_bytes?: number;
+    prepared_input_bytes?: number;
     transcribe_seconds?: number;
     realtime_factor?: number;
   };
@@ -36,6 +38,15 @@ function toSegments(raw: GatewaySegment[]): TranscriptSegment[] {
     }))
     .filter((s) => s.text.length > 0 && s.endMs > s.startMs)
     .sort((a, b) => a.startMs - b.startMs);
+}
+
+function sumDefinedNumbers(...values: Array<number | undefined>): number | undefined {
+  const definedValues = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (definedValues.length === 0) {
+    return undefined;
+  }
+
+  return definedValues.reduce((sum, value) => sum + value, 0);
 }
 
 const GATEWAY_TIMEOUT_MS = 290_000;
@@ -177,13 +188,9 @@ export async function gatewayTranscription(
     analysisWindowMs: boundedAnalysisWindowMs,
     analyzedDurationMs: segments.length === 0 ? 0 : (segments[segments.length - 1]?.endMs ?? 0),
     analysisTruncated: Boolean(meta?.analysis_truncated),
+    inputBytes: meta?.prepared_input_bytes,
     requestDurationMs,
-    providerQueueDelayMs:
-      typeof meta?.download_ms === "number" && typeof meta?.speedup_ms === "number"
-        ? meta.download_ms + meta.speedup_ms
-        : typeof meta?.download_ms === "number"
-          ? meta.download_ms
-          : undefined,
+    providerQueueDelayMs: sumDefinedNumbers(meta?.download_ms, meta?.prepare_ms),
     providerExecutionMs: meta?.transcribe_seconds ? Math.round(meta.transcribe_seconds * 1000) : undefined
   };
 }
