@@ -16,7 +16,7 @@ import {
   transcribeWithGroq,
   type TranscriptionResult
 } from "./groq.js";
-import { transcribeWithMistral } from "./mistral.js";
+import { MistralRetryableError, transcribeWithMistral } from "./mistral.js";
 import { cleanupFile, speedUpAudio } from "./speedup.js";
 
 const PORT = Number(process.env.PORT) || 8000;
@@ -25,7 +25,6 @@ const GROQ_API_KEYS = process.env.GROQ_API_KEYS ?? "";
 const GATEWAY_TOKEN = process.env.TRANSCRIPTION_GATEWAY_TOKEN ?? "";
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY ?? "";
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL ?? "voxtral-mini-latest";
-const TRANSCRIPTION_PROVIDER = process.env.TRANSCRIPTION_PROVIDER ?? (MISTRAL_API_KEY ? "mistral" : "groq");
 const SPEED_MULTIPLIER = Number(process.env.SPEED_MULTIPLIER) || 2;
 const DOWNLOAD_TIMEOUT_MS = 180_000;
 const groqKeys = parseGroqKeyConfigs(GROQ_API_KEYS, GROQ_API_KEY);
@@ -34,21 +33,9 @@ const groqKeyPool = createGroqKeyPool(groqKeys);
 const app = Fastify({ logger: true, bodyLimit: 200 * 1024 * 1024 });
 await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } });
 
-function resolveConfiguredProvider(): "groq" | "mistral" {
-  switch (TRANSCRIPTION_PROVIDER) {
-    case "groq":
-    case "mistral":
-      return TRANSCRIPTION_PROVIDER;
-    default:
-      throw new Error(`Unsupported TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER}`);
-  }
-}
-
-const configuredProvider = resolveConfiguredProvider();
-
 app.get("/health", async () => ({
   status: "ok",
-  transcription_provider: configuredProvider,
+  transcription_provider: "groq-with-mistral-fallback",
   speed_multiplier: SPEED_MULTIPLIER,
   groq_configured: groqKeys.length > 0,
   groq_key_count: groqKeys.length,
@@ -126,30 +113,49 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     let result: TranscriptionResult;
 
     try {
-      switch (configuredProvider) {
-        case "groq":
-          if (groqKeyPool.size === 0) {
-            return reply.status(500).send({ error: "GROQ_API_KEY or GROQ_API_KEYS is not configured" });
-          }
-
+      if (groqKeyPool.size > 0) {
+        try {
           result = await transcribeWithGroq(
             speedAudioPath,
             groqKeyPool,
             SPEED_MULTIPLIER,
           );
-          break;
-        case "mistral":
+        } catch (error) {
+          if (!(error instanceof GroqRateLimitError) || error.scope !== "all-keys") {
+            throw error;
+          }
+
+          const retryAfterSeconds = error.retryAfterSeconds ?? 60;
+          await sendGroqCapacityAlert({
+            keyCount: groqKeyPool.size,
+            retryAfterSeconds,
+            errorMessage: error.message
+          });
+
+          if (!MISTRAL_API_KEY) {
+            reply.header("Retry-After", String(retryAfterSeconds));
+            return reply.status(429).send({
+              error: error.message,
+              retry_after_seconds: retryAfterSeconds
+            });
+          }
+
           result = await transcribeWithMistral(
             speedAudioPath,
             MISTRAL_API_KEY,
             MISTRAL_MODEL,
             SPEED_MULTIPLIER
           );
-          break;
-        default: {
-          const exhaustiveCheck: never = configuredProvider;
-          throw new Error(`Unhandled transcription provider: ${String(exhaustiveCheck)}`);
         }
+      } else if (MISTRAL_API_KEY) {
+        result = await transcribeWithMistral(
+          speedAudioPath,
+          MISTRAL_API_KEY,
+          MISTRAL_MODEL,
+          SPEED_MULTIPLIER
+        );
+      } else {
+        return reply.status(500).send({ error: "No transcription providers are configured" });
       }
     } catch (error) {
       if (error instanceof GroqRateLimitError) {
@@ -163,6 +169,15 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
           });
         }
 
+        reply.header("Retry-After", String(retryAfterSeconds));
+        return reply.status(429).send({
+          error: error.message,
+          retry_after_seconds: retryAfterSeconds
+        });
+      }
+
+      if (error instanceof MistralRetryableError) {
+        const retryAfterSeconds = error.retryAfterSeconds ?? 60;
         reply.header("Retry-After", String(retryAfterSeconds));
         return reply.status(429).send({
           error: error.message,

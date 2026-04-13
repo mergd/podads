@@ -1,4 +1,5 @@
 import { handleEpisodeJob, type EpisodeJobResult } from "./lib/processEpisode";
+import { stampRetryMessage } from "./lib/retryable";
 import { recoverStaleEpisodeJobs } from "./lib/staleJobs";
 import type { EpisodeJobMessage } from "./lib/types";
 
@@ -30,12 +31,14 @@ export default {
             message.ack();
             break;
           case "retry":
+            stampRetryMessage(message.body);
             message.retry({ delaySeconds: result.delaySeconds });
             break;
           default:
             assertNever(result);
         }
       } catch (error) {
+        stampRetryMessage(message.body);
         message.retry();
       }
     }

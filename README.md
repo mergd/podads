@@ -31,6 +31,7 @@ Required GitHub repository secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
+- `DISCORD_PROCESSING_FAILURE_WEBHOOK_URL` for processor failure alerts
 - `RAILWAY_TOKEN`
 
 ## Database

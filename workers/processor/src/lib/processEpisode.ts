@@ -2,8 +2,9 @@ import type { EpisodeProcessingSubstatus } from "@podads/shared/api";
 
 import { detectAdSpans } from "./adDetection";
 import { rewriteAudio } from "./audioRewrite";
+import { notifyEpisodeProcessingFailure } from "./discord";
 import { capturePostHogEvent } from "./posthog";
-import { getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
+import { getNextRetryAttempt, getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
 import { generateTranscript } from "./transcription";
 import type { AdSpan, AudioRewriteManifest, EpisodeJobMessage, EpisodeRecord, TranscriptResult } from "./types";
 
@@ -577,13 +578,14 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     );
 
     if (isRetryableProcessingError(error)) {
-      const delaySeconds = getRetryDelaySeconds(error, 60);
+      const nextRetryAttempt = getNextRetryAttempt(message.pollAttempt);
+      const delaySeconds = getRetryDelaySeconds(error, 60, nextRetryAttempt, message.episodeId);
       const retryProcessingDetails = JSON.stringify(
         withProcessingSubstatus({}, "retry_scheduled", now, {
           currentJobId: message.jobId,
           retryDelaySeconds: delaySeconds,
           retryScheduledAt: now,
-          queueAttempt: message.pollAttempt ?? 0
+          queueAttempt: nextRetryAttempt
         })
       );
 
@@ -602,6 +604,8 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     }
 
     await markJobFailed(env.DB, message, errorMessage, failureProcessingDetails);
+    const episode = await loadEpisode(env.DB, message.episodeId);
+    await notifyEpisodeProcessingFailure(env, message, errorMessage, episode);
     await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_failed", {
       episode_id: message.episodeId,
       feed_id: message.feedId,

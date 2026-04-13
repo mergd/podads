@@ -80,13 +80,17 @@ jobs:
           workingDirectory: workers/api
           command: deploy
 
-      - name: Deploy Processor Worker
+      - name: Deploy Processor Worker with Discord webhook
         uses: cloudflare/wrangler-action@v3.14.1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/processor
           command: deploy
+          secrets: |
+            DISCORD_PROCESSING_FAILURE_WEBHOOK_URL
+        env:
+          DISCORD_PROCESSING_FAILURE_WEBHOOK_URL: ${{ secrets.DISCORD_PROCESSING_FAILURE_WEBHOOK_URL }}
 
   check-railway-changes:
     runs-on: ubuntu-latest

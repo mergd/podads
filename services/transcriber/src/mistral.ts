@@ -23,6 +23,46 @@ interface MistralResponse {
 
 const MISTRAL_REQUEST_TIMEOUT_MS = 300_000;
 const MISTRAL_STT_USD_PER_MINUTE = 0.003;
+const DEFAULT_RETRY_AFTER_SECONDS = 60;
+
+export class MistralRetryableError extends Error {
+  retryAfterSeconds?: number;
+
+  constructor(message: string, retryAfterSeconds?: number) {
+    super(message);
+    this.name = "MistralRetryableError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+function parseRetryAfterSeconds(retryAfterHeader: string | null, body: string): number | undefined {
+  if (retryAfterHeader) {
+    const numeric = Number.parseInt(retryAfterHeader, 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+
+    const dateMs = Date.parse(retryAfterHeader);
+    if (Number.isFinite(dateMs)) {
+      const delaySeconds = Math.ceil((dateMs - Date.now()) / 1000);
+      if (delaySeconds > 0) {
+        return delaySeconds;
+      }
+    }
+  }
+
+  const durationMatch = body.match(/try again in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i);
+  if (!durationMatch) {
+    return undefined;
+  }
+
+  const hours = Number.parseInt(durationMatch[1] ?? "0", 10) || 0;
+  const minutes = Number.parseInt(durationMatch[2] ?? "0", 10) || 0;
+  const seconds = Number.parseInt(durationMatch[3] ?? "0", 10) || 0;
+  const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+
+  return totalSeconds > 0 ? totalSeconds : undefined;
+}
 
 export async function transcribeWithMistral(
   audioPath: string,
@@ -54,6 +94,14 @@ export async function transcribeWithMistral(
 
   if (!response.ok) {
     const body = await response.text();
+
+    if (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504) {
+      throw new MistralRetryableError(
+        `Mistral ${response.status}: ${body}`,
+        parseRetryAfterSeconds(response.headers.get("retry-after"), body) ?? DEFAULT_RETRY_AFTER_SECONDS
+      );
+    }
+
     throw new Error(`Mistral ${response.status}: ${body}`);
   }
 
