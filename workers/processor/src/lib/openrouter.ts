@@ -21,6 +21,20 @@ interface OpenRouterResponse {
   };
 }
 
+export class OpenRouterRequestError extends Error {
+  status: number;
+  body: string;
+  retryAfterSeconds?: number;
+
+  constructor(status: number, body: string, retryAfterSeconds?: number) {
+    super(`OpenRouter chat completion failed (${status}): ${body}`);
+    this.name = "OpenRouterRequestError";
+    this.status = status;
+    this.body = body;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export interface OpenRouterMetrics {
   estimatedCostUsd: number;
   promptTokens?: number;
@@ -30,6 +44,37 @@ export interface OpenRouterMetrics {
 }
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_RETRY_AFTER_SECONDS = 60;
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+function parseRetryAfterSeconds(headerValue: string | null, body: string): number | undefined {
+  if (headerValue) {
+    const numeric = Number.parseInt(headerValue, 10);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+
+    const dateMs = Date.parse(headerValue);
+    if (Number.isFinite(dateMs)) {
+      const delaySeconds = Math.ceil((dateMs - Date.now()) / 1000);
+      if (delaySeconds > 0) {
+        return delaySeconds;
+      }
+    }
+  }
+
+  const durationMatch = body.match(/try again in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i);
+  if (!durationMatch) {
+    return undefined;
+  }
+
+  const hours = Number.parseInt(durationMatch[1] ?? "0", 10) || 0;
+  const minutes = Number.parseInt(durationMatch[2] ?? "0", 10) || 0;
+  const seconds = Number.parseInt(durationMatch[3] ?? "0", 10) || 0;
+  const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+
+  return totalSeconds > 0 ? totalSeconds : undefined;
+}
 
 function extractMessageText(message: OpenRouterMessage | undefined): string {
   const content = message?.content;
@@ -82,6 +127,10 @@ export function getOpenRouterMetrics(payload: OpenRouterResponse, requestDuratio
   };
 }
 
+export function isRetryableOpenRouterStatus(status: number): boolean {
+  return RETRYABLE_STATUS_CODES.has(status);
+}
+
 export function parseStructuredOutput<T>(payload: OpenRouterResponse): T {
   const text = extractJsonText(payload);
 
@@ -115,7 +164,10 @@ export async function createOpenRouterChatCompletion(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`OpenRouter chat completion failed (${response.status}): ${text}`);
+    const retryAfterSeconds = isRetryableOpenRouterStatus(response.status)
+      ? parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_AFTER_SECONDS
+      : undefined;
+    throw new OpenRouterRequestError(response.status, text, retryAfterSeconds);
   }
 
   const payload = (await response.json()) as OpenRouterResponse;

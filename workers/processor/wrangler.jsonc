@@ -38,6 +38,8 @@
     "APP_BASE_URL": "http://localhost:8787",
     "PROCESSING_VERSION": "v1",
     "CLASSIFICATION_PROVIDER": "openrouter",
+    "OPENROUTER_CLASSIFICATION_MODEL": "google/gemini-3.1-flash-lite-preview",
+    "OPENROUTER_CLASSIFICATION_FALLBACK_MODEL": "qwen/qwen3.6-plus",
     "TRANSCRIPTION_GATEWAY_URL": "https://transcriber-production-e6f9.up.railway.app",
     "POSTHOG_HOST": "https://us.i.posthog.com"
   },

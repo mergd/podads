@@ -697,37 +697,56 @@ export async function enqueueEpisodeJobs(
 }
 
 export async function getHomeData(db: D1Database, baseUrl: string, uiBaseUrl: string): Promise<HomeResponse> {
-  const latestEpisodes = await db
-    .prepare(
-      `SELECT episodes.*, feeds.slug AS feed_slug, feeds.title AS feed_title
-      FROM episodes
-      INNER JOIN feeds ON feeds.id = episodes.feed_id`
-    )
-    .all<EpisodeRow & { feed_slug: string; feed_title: string | null }>();
-
-  const feeds = await db
-    .prepare(
-      `SELECT *
-      FROM feeds`
-    )
-    .all<FeedRow>();
-
-  const feedEpisodeStats = await db
-    .prepare(
-      `SELECT feed_id, pub_date
-      FROM episodes`
-    )
-    .all<EpisodeDateStatRow>();
-
-  const feedsWithStats = attachFeedEpisodeStats(feeds.results, feedEpisodeStats.results);
+  const [latestEpisodes, feeds] = await Promise.all([
+    db
+      .prepare(
+        `SELECT episodes.*, feeds.slug AS feed_slug, feeds.title AS feed_title
+        FROM episodes
+        INNER JOIN feeds ON feeds.id = episodes.feed_id
+        ORDER BY ${EPISODE_SORT_MS_SQL} DESC,
+          COALESCE(CAST(strftime('%s', episodes.last_processed_at) AS INTEGER) * 1000, -1) DESC,
+          CAST(strftime('%s', episodes.updated_at) AS INTEGER) * 1000 DESC,
+          episodes.id DESC
+        LIMIT 10`
+      )
+      .all<EpisodeRow & { feed_slug: string; feed_title: string | null }>(),
+    db
+      .prepare(
+        `WITH ranked_feed_episodes AS (
+          SELECT
+            feed_id,
+            pub_date,
+            COUNT(*) OVER (PARTITION BY feed_id) AS episode_count,
+            ${EPISODE_SORT_MS_SQL_BARE} AS sort_ms,
+            ROW_NUMBER() OVER (
+              PARTITION BY feed_id
+              ORDER BY ${EPISODE_SORT_MS_SQL_BARE} DESC,
+                COALESCE(CAST(strftime('%s', last_processed_at) AS INTEGER) * 1000, -1) DESC,
+                CAST(strftime('%s', updated_at) AS INTEGER) * 1000 DESC,
+                id DESC
+            ) AS row_num
+          FROM episodes
+        )
+        SELECT
+          feeds.*,
+          ranked_feed_episodes.pub_date AS latest_episode_pub_date,
+          COALESCE(ranked_feed_episodes.episode_count, 0) AS episode_count
+        FROM feeds
+        LEFT JOIN ranked_feed_episodes
+          ON ranked_feed_episodes.feed_id = feeds.id
+          AND ranked_feed_episodes.row_num = 1
+        ORDER BY ranked_feed_episodes.sort_ms DESC,
+          COALESCE(CAST(strftime('%s', feeds.last_refreshed_at) AS INTEGER) * 1000, -1) DESC,
+          CAST(strftime('%s', feeds.created_at) AS INTEGER) * 1000 DESC,
+          feeds.id DESC
+        LIMIT 12`
+      )
+      .all<FeedRowWithStats>()
+  ]);
 
   return {
-    latestEpisodes: sortEpisodeRows(latestEpisodes.results)
-      .slice(0, 10)
-      .map((row) => buildEpisodeSummary(row, baseUrl, uiBaseUrl)),
-    feeds: sortFeedRows(feedsWithStats)
-      .slice(0, 12)
-      .map(buildFeedSummary)
+    latestEpisodes: latestEpisodes.results.map((row) => buildEpisodeSummary(row, baseUrl, uiBaseUrl)),
+    feeds: feeds.results.map(buildFeedSummary)
   };
 }
 

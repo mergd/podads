@@ -1,7 +1,14 @@
-import { createOpenRouterChatCompletion, parseStructuredOutput } from "../../lib/openrouter";
+import {
+  createOpenRouterChatCompletion,
+  isRetryableOpenRouterStatus,
+  OpenRouterRequestError,
+  parseStructuredOutput
+} from "../../lib/openrouter";
+import { RetryableProcessingError } from "../../lib/retryable";
 import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 
 export const OPENROUTER_CLASSIFICATION_MODEL = "google/gemini-3.1-flash-lite-preview";
+export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "qwen/qwen3.6-plus";
 const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
 
 export interface AdClassificationPromptOptions {
@@ -16,6 +23,20 @@ interface OpenRouterClassificationPayload {
     confidence: number;
     reason: string;
   }>;
+}
+
+function getConfiguredModel(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+}
+
+function getClassificationModels(env: Env): string[] {
+  const configuredModels = [
+    getConfiguredModel(env.OPENROUTER_CLASSIFICATION_MODEL, OPENROUTER_CLASSIFICATION_MODEL),
+    getConfiguredModel(env.OPENROUTER_CLASSIFICATION_FALLBACK_MODEL, OPENROUTER_CLASSIFICATION_FALLBACK_MODEL)
+  ];
+
+  return configuredModels.filter((model, index) => configuredModels.indexOf(model) === index);
 }
 
 export function buildAdClassificationPrompt(
@@ -146,8 +167,35 @@ export async function openRouterClassification(
   transcript: TranscriptResult,
   options: AdClassificationPromptOptions = {}
 ): Promise<AdDetectionResult> {
-  return runOpenRouterClassificationModel(env, OPENROUTER_CLASSIFICATION_MODEL, transcript, {
+  const models = getClassificationModels(env);
+  const classificationOptions = {
     mentionPrerolls: true,
     ...options
-  });
+  };
+  let lastRetryableError: OpenRouterRequestError | null = null;
+
+  for (const model of models) {
+    try {
+      return await runOpenRouterClassificationModel(env, model, transcript, classificationOptions);
+    } catch (error) {
+      if (!(error instanceof OpenRouterRequestError)) {
+        throw error;
+      }
+
+      if (!isRetryableOpenRouterStatus(error.status)) {
+        throw error;
+      }
+
+      lastRetryableError = error;
+    }
+  }
+
+  if (lastRetryableError) {
+    throw new RetryableProcessingError(
+      `OpenRouter classification exhausted fallback models (${models.join(" -> ")}): ${lastRetryableError.message}`,
+      lastRetryableError.retryAfterSeconds
+    );
+  }
+
+  throw new Error("No OpenRouter classification models are configured.");
 }
