@@ -6,7 +6,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./api": "./src/api.ts",
+    "./audio": "./src/audio.ts",
     "./queue": "./src/queue.ts"
+  },
+  "dependencies": {
+    "mp3-parser": "^0.3.0"
   },
   "scripts": {
     "build": "tsc --noEmit",

@@ -8,6 +8,8 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@podads/shared": "workspace:*",
+    "mp3-parser": "^0.3.0",
     "fastify": "^5.3.3",
     "@fastify/multipart": "^9.0.0"
   },

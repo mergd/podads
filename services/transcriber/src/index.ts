@@ -1,14 +1,9 @@
-import { createWriteStream } from "node:fs";
-import { unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
-
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 
+import { buildRewriteResponseHeaders, rewriteAudioFromUrl, type RewriteSpan } from "./rewrite.js";
 import { sendGroqCapacityAlert } from "./alerts.js";
+import { downloadToTmp, saveUploadToTmp } from "./downloads.js";
 import {
   createGroqKeyPool,
   GroqRateLimitError,
@@ -26,7 +21,6 @@ const GATEWAY_TOKEN = process.env.TRANSCRIPTION_GATEWAY_TOKEN ?? "";
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY ?? "";
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL ?? "voxtral-mini-latest";
 const SPEED_MULTIPLIER = Number(process.env.SPEED_MULTIPLIER) || 2;
-const DOWNLOAD_TIMEOUT_MS = 180_000;
 const groqKeys = parseGroqKeyConfigs(GROQ_API_KEYS, GROQ_API_KEY);
 const groqKeyPool = createGroqKeyPool(groqKeys);
 
@@ -52,29 +46,18 @@ function isAuthorized(authHeader: string | undefined): boolean {
   return authHeader === `Bearer ${GATEWAY_TOKEN}`;
 }
 
-async function downloadToTmp(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: { "User-Agent": "PodAds/1.0" },
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
-  });
-  if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
-
-  const tmpPath = join(tmpdir(), `dl-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
-  const dest = createWriteStream(tmpPath);
-  await pipeline(Readable.fromWeb(res.body as never), dest);
-  return tmpPath;
-}
-
-async function saveUploadToTmp(data: Buffer): Promise<string> {
-  const tmpPath = join(tmpdir(), `upload-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
-  const { writeFile } = await import("node:fs/promises");
-  await writeFile(tmpPath, data);
-  return tmpPath;
-}
-
 interface TranscribeBody {
   analysis_window_ms?: number;
   url?: string;
+}
+
+interface RewriteBody {
+  url?: string;
+  source_content_type?: string | null;
+  ad_spans?: Array<{
+    start_ms?: number;
+    end_ms?: number;
+  }>;
 }
 
 function normalizeAnalysisWindowMs(value: number | undefined): number | null {
@@ -83,6 +66,33 @@ function normalizeAnalysisWindowMs(value: number | undefined): number | null {
   }
 
   return Math.floor(value);
+}
+
+function normalizeRewriteSpans(value: RewriteBody["ad_spans"]): RewriteSpan[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value.flatMap((span) => {
+    if (!span || typeof span !== "object") {
+      return [];
+    }
+
+    const startMs = span.start_ms;
+    const endMs = span.end_ms;
+
+    if (
+      typeof startMs !== "number"
+      || typeof endMs !== "number"
+      || !Number.isFinite(startMs)
+      || !Number.isFinite(endMs)
+      || endMs <= startMs
+    ) {
+      return [];
+    }
+
+    return [{ startMs: Math.max(0, Math.round(startMs)), endMs: Math.max(0, Math.round(endMs)) }];
+  });
 }
 
 function truncateTranscriptionResult(
@@ -264,6 +274,34 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
   } finally {
     await Promise.all(filesToCleanup.map(cleanupFile));
   }
+});
+
+app.post<{ Body: RewriteBody }>("/v1/audio/rewrite", async (request, reply) => {
+  if (!isAuthorized(request.headers.authorization)) {
+    return reply.status(401).send({ error: "Unauthorized" });
+  }
+
+  const body = request.body as RewriteBody;
+  const url = typeof body.url === "string" ? body.url : null;
+  const adSpans = normalizeRewriteSpans(body.ad_spans);
+
+  if (!url || adSpans === null) {
+    return reply.status(400).send({ error: "Provide a JSON body with 'url' and valid 'ad_spans'" });
+  }
+
+  const result = await rewriteAudioFromUrl({
+    url,
+    sourceContentType: typeof body.source_content_type === "string" ? body.source_content_type : null,
+    adSpans
+  });
+  const responseHeaders = buildRewriteResponseHeaders(result);
+
+  for (const [headerName, headerValue] of Object.entries(responseHeaders)) {
+    reply.header(headerName, headerValue);
+  }
+
+  reply.type(result.contentType);
+  return reply.send(Buffer.from(result.bytes));
 });
 
 await app.listen({ port: PORT, host: "0.0.0.0" });

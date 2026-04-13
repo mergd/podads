@@ -1,3 +1,7 @@
+import type { AudioRewriteManifest } from "@podads/shared/audio";
+
+export type { AudioRewriteManifest, TimeRange } from "@podads/shared/audio";
+
 export type { EpisodeQueueMessage as EpisodeJobMessage } from "@podads/shared/queue";
 
 export interface TranscriptSegment {
@@ -37,11 +41,6 @@ export interface AdDetectionContext {
   feedSlug?: string | null;
 }
 
-export interface TimeRange {
-  startMs: number;
-  endMs: number;
-}
-
 export interface AdDetectionResult {
   provider: string;
   model: string;
@@ -51,19 +50,6 @@ export interface AdDetectionResult {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
-}
-
-export interface AudioRewriteManifest {
-  mode: "mp3-frame-splice" | "passthrough";
-  sourceContentType: string;
-  sourceDurationMs: number | null;
-  cleanedDurationMs: number | null;
-  requestedRemovedRanges: TimeRange[];
-  actualRemovedRanges: TimeRange[];
-  retainedRanges: TimeRange[];
-  frameCount: number | null;
-  keptFrameCount: number | null;
-  notes: string[];
 }
 
 export interface AudioRewriteResult {

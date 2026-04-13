@@ -1,4 +1,5 @@
 import type { EpisodeProcessingSubstatus } from "@podads/shared/api";
+import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 
 import { detectAdSpans } from "./adDetection";
 import { rewriteAudio } from "./audioRewrite";
@@ -570,14 +571,21 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown episode processing failure";
     const now = new Date().toISOString();
+    const processingAttemptCount = Math.max(1, (message.pollAttempt ?? 0) + 1);
+    const retryableError = isRetryableProcessingError(error);
+    const retryLimitReached = retryableError && processingAttemptCount >= MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS;
     const failureProcessingDetails = JSON.stringify(
       withProcessingSubstatus({}, null, now, {
         currentJobId: message.jobId,
-        failedAt: now
+        failedAt: now,
+        queueAttempt: message.pollAttempt ?? 0,
+        processingAttemptCount,
+        maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS,
+        retryLimitReachedAt: retryLimitReached ? now : null
       })
     );
 
-    if (isRetryableProcessingError(error)) {
+    if (retryableError && !retryLimitReached) {
       const nextRetryAttempt = getNextRetryAttempt(message.pollAttempt);
       const delaySeconds = getRetryDelaySeconds(error, 60, nextRetryAttempt, message.episodeId);
       const retryProcessingDetails = JSON.stringify(
@@ -585,7 +593,9 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
           currentJobId: message.jobId,
           retryDelaySeconds: delaySeconds,
           retryScheduledAt: now,
-          queueAttempt: nextRetryAttempt
+          queueAttempt: nextRetryAttempt,
+          processingAttemptCount,
+          maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS
         })
       );
 
@@ -594,7 +604,8 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
         episode_id: message.episodeId,
         feed_id: message.feedId,
         error: errorMessage,
-        retry_delay_seconds: delaySeconds
+        retry_delay_seconds: delaySeconds,
+        processing_attempt_count: processingAttemptCount
       });
 
       return {
@@ -609,7 +620,8 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_failed", {
       episode_id: message.episodeId,
       feed_id: message.feedId,
-      error: errorMessage
+      error: errorMessage,
+      processing_attempt_count: processingAttemptCount
     });
     return { kind: "ack" };
   }

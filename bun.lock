@@ -12,6 +12,9 @@
     "packages/shared": {
       "name": "@podads/shared",
       "version": "0.1.0",
+      "dependencies": {
+        "mp3-parser": "^0.3.0",
+      },
     },
     "ui": {
       "name": "ui",

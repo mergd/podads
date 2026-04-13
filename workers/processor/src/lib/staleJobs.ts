@@ -1,3 +1,5 @@
+import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
+
 import type { EpisodeJobMessage } from "./types";
 
 const MIN_STALE_SECONDS = 30 * 60;
@@ -88,6 +90,8 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
     }
 
     const now = new Date().toISOString();
+    const processingAttemptCount = Math.max(1, (message.pollAttempt ?? 0) + 1);
+    const retryLimitReached = processingAttemptCount >= MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS;
     const retryMessage: EpisodeJobMessage = {
       ...message,
       jobId: crypto.randomUUID(),
@@ -101,25 +105,61 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
       queuedAt: now,
       currentJobId: retryMessage.jobId,
       queueAttempt: retryMessage.pollAttempt ?? 0,
-      recoveryReason: errorMessage
+      recoveryReason: errorMessage,
+      processingAttemptCount: processingAttemptCount + 1,
+      maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS
+    });
+    const failedDetails = JSON.stringify({
+      processingSubstatus: null,
+      processingSubstatusUpdatedAt: now,
+      currentJobId: message.jobId,
+      failedAt: now,
+      queueAttempt: message.pollAttempt ?? 0,
+      processingAttemptCount,
+      maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS,
+      recoveryReason: errorMessage,
+      retryLimitReachedAt: now
     });
 
-    await env.DB.batch([
-      env.DB
-        .prepare(
-          `UPDATE jobs
-          SET status = 'failed', last_error = ?2, updated_at = ?3
-          WHERE id = ?1 AND status = 'processing'`
-        )
-        .bind(row.id, errorMessage, now),
-      env.DB
-        .prepare(
-          `UPDATE episodes
-          SET processing_status = 'pending', processing_details_json = ?2, last_error = ?3, updated_at = ?4
-          WHERE id = ?1 AND processing_status = 'processing'`
-        )
-        .bind(episodeId, queuedDetails, errorMessage, now)
-    ]);
+    await env.DB.batch(
+      retryLimitReached
+        ? [
+            env.DB
+              .prepare(
+                `UPDATE jobs
+                SET status = 'failed', last_error = ?2, updated_at = ?3
+                WHERE id = ?1 AND status = 'processing'`
+              )
+              .bind(row.id, errorMessage, now),
+            env.DB
+              .prepare(
+                `UPDATE episodes
+                SET processing_status = 'failed', processing_details_json = ?2, last_error = ?3, updated_at = ?4
+                WHERE id = ?1 AND processing_status = 'processing'`
+              )
+              .bind(episodeId, failedDetails, errorMessage, now)
+          ]
+        : [
+            env.DB
+              .prepare(
+                `UPDATE jobs
+                SET status = 'failed', last_error = ?2, updated_at = ?3
+                WHERE id = ?1 AND status = 'processing'`
+              )
+              .bind(row.id, errorMessage, now),
+            env.DB
+              .prepare(
+                `UPDATE episodes
+                SET processing_status = 'pending', processing_details_json = ?2, last_error = ?3, updated_at = ?4
+                WHERE id = ?1 AND processing_status = 'processing'`
+              )
+              .bind(episodeId, queuedDetails, errorMessage, now)
+          ]
+    );
+
+    if (retryLimitReached) {
+      continue;
+    }
 
     await env.PROCESSING_QUEUE.sendBatch([
       {

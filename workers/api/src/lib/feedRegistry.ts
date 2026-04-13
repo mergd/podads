@@ -14,6 +14,7 @@ import type {
   RegisterFeedResponse,
   SourceFeed
 } from "./types";
+import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 import { hashNormalizedUrl, normalizeFeedUrl, slugFromHash } from "./normalizeFeedUrl";
 
 const D1_BATCH_SIZE = 50;
@@ -159,6 +160,20 @@ function parseDateMs(value: string | null | undefined): number | null {
 const EPISODE_SORT_MS_SQL = "COALESCE(episodes.pub_date_ms, CAST(strftime('%s', episodes.created_at) AS INTEGER) * 1000)";
 
 const EPISODE_SORT_MS_SQL_BARE = "COALESCE(pub_date_ms, CAST(strftime('%s', created_at) AS INTEGER) * 1000)";
+
+const EPISODE_JOB_ATTEMPTS_JOIN_SQL = `LEFT JOIN (
+  SELECT episode_id, COUNT(*) AS processing_attempt_count
+  FROM jobs
+  WHERE kind = 'episode.process'
+  GROUP BY episode_id
+) AS job_attempts
+  ON job_attempts.episode_id = episodes.id`;
+
+const AUTOMATIC_EPISODE_SELECTION_FILTER_SQL = `(episodes.processing_status = 'pending'
+  OR (
+    episodes.processing_status = 'failed'
+    AND COALESCE(job_attempts.processing_attempt_count, 0) < ${MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS}
+  ))`;
 
 function compareNumbersDesc(left: number | null, right: number | null): number {
   if (left === null && right === null) {
@@ -575,8 +590,9 @@ export async function selectEpisodesForProcessing(
         ON active_jobs.episode_id = episodes.id
         AND active_jobs.kind = 'episode.process'
         AND active_jobs.status IN ('queued', 'processing')
+      ${EPISODE_JOB_ATTEMPTS_JOIN_SQL}
       WHERE episodes.feed_id = ?1
-        AND episodes.processing_status IN ('pending', 'failed')
+        AND ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
         AND active_jobs.id IS NULL
       ORDER BY
         CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
@@ -587,8 +603,9 @@ export async function selectEpisodesForProcessing(
         ON active_jobs.episode_id = episodes.id
         AND active_jobs.kind = 'episode.process'
         AND active_jobs.status IN ('queued', 'processing')
+      ${EPISODE_JOB_ATTEMPTS_JOIN_SQL}
       WHERE episodes.feed_id = ?1
-        AND episodes.processing_status IN ('pending', 'failed')
+        AND ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
         AND active_jobs.id IS NULL
       ORDER BY
         CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
@@ -622,7 +639,8 @@ export async function selectGlobalPendingEpisodesForProcessing(
         ON active_jobs.episode_id = episodes.id
         AND active_jobs.kind = 'episode.process'
         AND active_jobs.status IN ('queued', 'processing')
-      WHERE episodes.processing_status IN ('pending', 'failed')
+      ${EPISODE_JOB_ATTEMPTS_JOIN_SQL}
+      WHERE ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
         AND active_jobs.id IS NULL
       ORDER BY
         CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,
