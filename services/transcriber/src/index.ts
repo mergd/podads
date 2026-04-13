@@ -73,7 +73,48 @@ async function saveUploadToTmp(data: Buffer): Promise<string> {
 }
 
 interface TranscribeBody {
+  analysis_window_ms?: number;
   url?: string;
+}
+
+function normalizeAnalysisWindowMs(value: number | undefined): number | null {
+  if (!Number.isFinite(value) || !value || value <= 0) {
+    return null;
+  }
+
+  return Math.floor(value);
+}
+
+function truncateTranscriptionResult(
+  result: TranscriptionResult,
+  analysisWindowMs: number | null
+): { result: TranscriptionResult; analysisTruncated: boolean } {
+  if (analysisWindowMs === null) {
+    return {
+      result,
+      analysisTruncated: false
+    };
+  }
+
+  const analysisWindowSeconds = analysisWindowMs / 1000;
+  const analysisTruncated = result.segments.some((segment) => (segment.end * 1000) > analysisWindowMs);
+  const segments = result.segments
+    .filter((segment) => (segment.start * 1000) < analysisWindowMs)
+    .map((segment) => ({
+      ...segment,
+      end: Math.min(segment.end, analysisWindowSeconds)
+    }))
+    .filter((segment) => segment.end > segment.start);
+
+  return {
+    result: {
+      ...result,
+      text: segments.map((segment) => segment.text).join(" ").trim(),
+      segments,
+      duration: segments.length === 0 ? 0 : (segments[segments.length - 1]?.end ?? 0)
+    },
+    analysisTruncated
+  };
 }
 
 app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, reply) => {
@@ -85,6 +126,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
   const filesToCleanup: string[] = [];
   let downloadMs: number | undefined;
   let speedupMs: number | undefined;
+  let analysisWindowMs: number | null = null;
 
   try {
     let rawAudioPath: string;
@@ -99,6 +141,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     } else {
       const body = request.body as TranscribeBody;
       if (!body.url) return reply.status(400).send({ error: "Provide a file upload or JSON body with 'url'" });
+      analysisWindowMs = normalizeAnalysisWindowMs(body.analysis_window_ms);
       const downloadStart = Date.now();
       rawAudioPath = await downloadToTmp(body.url);
       downloadMs = Date.now() - downloadStart;
@@ -188,6 +231,8 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
       throw error;
     }
 
+    const truncated = truncateTranscriptionResult(result, analysisWindowMs);
+    result = truncated.result;
     const elapsed = (Date.now() - start) / 1000;
 
     return {
@@ -202,6 +247,8 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         speed_multiplier: SPEED_MULTIPLIER,
         download_ms: downloadMs,
         speedup_ms: speedupMs,
+        analysis_window_ms: analysisWindowMs,
+        analysis_truncated: truncated.analysisTruncated,
         transcribe_seconds: Math.round(elapsed * 100) / 100,
         realtime_factor: elapsed > 0 ? Math.round((result.duration / elapsed) * 10) / 10 : 0,
       },

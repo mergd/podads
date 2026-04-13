@@ -13,6 +13,8 @@ interface GatewayResponse {
   segments: GatewaySegment[];
   duration: number;
   x_podads?: {
+    analysis_truncated?: boolean;
+    analysis_window_ms?: number;
     provider?: string;
     model?: string;
     estimated_cost_usd?: number | null;
@@ -129,7 +131,11 @@ async function fetchGateway(
   throw lastError ?? new RetryableProcessingError("Transcription gateway failed after retries", DEFAULT_RETRY_DELAY_SECONDS);
 }
 
-export async function gatewayTranscription(env: Env, episode: EpisodeRecord): Promise<TranscriptResult> {
+export async function gatewayTranscription(
+  env: Env,
+  episode: EpisodeRecord,
+  analysisWindowMs?: number
+): Promise<TranscriptResult> {
   const baseUrl = env.TRANSCRIPTION_GATEWAY_URL;
   if (!baseUrl) {
     throw new Error("Missing TRANSCRIPTION_GATEWAY_URL configuration.");
@@ -140,7 +146,10 @@ export async function gatewayTranscription(env: Env, episode: EpisodeRecord): Pr
   const response = await fetchGateway(
     `${baseUrl.replace(/\/+$/, "")}/v1/audio/transcriptions`,
     gatewayToken,
-    JSON.stringify({ url: episode.source_enclosure_url })
+    JSON.stringify({
+      url: episode.source_enclosure_url,
+      analysis_window_ms: analysisWindowMs
+    })
   );
 
   const payload = (await response.json()) as GatewayResponse;
@@ -154,6 +163,10 @@ export async function gatewayTranscription(env: Env, episode: EpisodeRecord): Pr
   }
 
   const meta = payload.x_podads;
+  const boundedAnalysisWindowMs =
+    typeof meta?.analysis_window_ms === "number" && Number.isFinite(meta.analysis_window_ms) && meta.analysis_window_ms > 0
+      ? Math.round(meta.analysis_window_ms)
+      : null;
 
   return {
     provider: meta?.provider ?? "gateway",
@@ -161,9 +174,9 @@ export async function gatewayTranscription(env: Env, episode: EpisodeRecord): Pr
     text,
     segments,
     estimatedCostUsd: meta?.estimated_cost_usd ?? 0,
-    analysisWindowMs: null,
+    analysisWindowMs: boundedAnalysisWindowMs,
     analyzedDurationMs: segments.length === 0 ? 0 : (segments[segments.length - 1]?.endMs ?? 0),
-    analysisTruncated: false,
+    analysisTruncated: Boolean(meta?.analysis_truncated),
     requestDurationMs,
     providerQueueDelayMs:
       typeof meta?.download_ms === "number" && typeof meta?.speedup_ms === "number"

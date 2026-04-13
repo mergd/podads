@@ -32,5 +32,6 @@ export async function generateTranscript(
   _processingVersion: string,
   _state: Record<string, unknown>
 ): Promise<TranscriptResult> {
-  return truncateTranscriptForAnalysis(await gatewayTranscription(env, episode));
+  const transcript = await gatewayTranscription(env, episode, MAX_AD_ANALYSIS_DURATION_MS);
+  return transcript.analysisWindowMs !== null ? transcript : truncateTranscriptForAnalysis(transcript);
 }
