@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 
 import { buildRewriteResponseHeaders, rewriteAudioFromUrl, type RewriteSpan } from "./rewrite.js";
-import { sendGroqCapacityAlert } from "./alerts.js";
+import { sendMistralCapacityAlert } from "./alerts.js";
 import { downloadToTmp, saveUploadToTmp } from "./downloads.js";
 import {
   createGroqKeyPool,
@@ -185,12 +185,6 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
           }
 
           const retryAfterSeconds = error.retryAfterSeconds ?? 60;
-          await sendGroqCapacityAlert({
-            keyCount: groqKeyPool.size,
-            retryAfterSeconds,
-            errorMessage: error.message
-          });
-
           if (!MISTRAL_API_KEY) {
             reply.header("Retry-After", String(retryAfterSeconds));
             return reply.status(429).send({
@@ -219,15 +213,6 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     } catch (error) {
       if (error instanceof GroqRateLimitError) {
         const retryAfterSeconds = error.retryAfterSeconds ?? 60;
-
-        if (error.scope === "all-keys") {
-          await sendGroqCapacityAlert({
-            keyCount: groqKeyPool.size,
-            retryAfterSeconds,
-            errorMessage: error.message
-          });
-        }
-
         reply.header("Retry-After", String(retryAfterSeconds));
         return reply.status(429).send({
           error: error.message,
@@ -237,6 +222,15 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
 
       if (error instanceof MistralRetryableError) {
         const retryAfterSeconds = error.retryAfterSeconds ?? 60;
+
+        if (error.statusCode === 429) {
+          await sendMistralCapacityAlert({
+            model: MISTRAL_MODEL,
+            retryAfterSeconds,
+            errorMessage: error.message
+          });
+        }
+
         reply.header("Retry-After", String(retryAfterSeconds));
         return reply.status(429).send({
           error: error.message,

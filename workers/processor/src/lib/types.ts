@@ -53,7 +53,7 @@ export interface AdDetectionResult {
 }
 
 export interface AudioRewriteResult {
-  key: string;
+  key: string | null;
   bytesWritten: number;
   manifest: AudioRewriteManifest;
 }
@@ -64,8 +64,10 @@ export interface EpisodeRecord {
   title: string | null;
   feed_title?: string | null;
   feed_slug?: string | null;
+  has_ads: number | null;
   source_enclosure_url: string;
   source_enclosure_type: string | null;
-  processing_status: "pending" | "processing" | "ready" | "failed";
+  source_enclosure_length?: string | null;
+  processing_status: "pending" | "processing" | "ready" | "failed" | "skipped";
   processing_details_json: string;
 }

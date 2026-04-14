@@ -50,7 +50,6 @@ function sumDefinedNumbers(...values: Array<number | undefined>): number | undef
 }
 
 const GATEWAY_TIMEOUT_MS = 290_000;
-const MAX_RETRIES = 2;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504, 524]);
 
@@ -88,58 +87,52 @@ async function fetchGateway(
   gatewayToken: string | undefined,
   body: string
 ): Promise<Response> {
-  let lastError: Error | null = null;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {})
+      },
+      body,
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
+    });
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {})
-        },
-        body,
-        signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
-      });
+    if (response.ok) {
+      return response;
+    }
 
-      if (response.ok) {
-        return response;
-      }
+    const text = await response.text();
 
-      const text = await response.text();
-
-      if (response.status === 429) {
-        throw new RetryableProcessingError(
-          `Transcription gateway failed (${response.status}): ${text}`,
-          parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_DELAY_SECONDS
-        );
-      }
-
-      if (!RETRYABLE_STATUS_CODES.has(response.status)) {
-        throw new Error(`Transcription gateway failed (${response.status}): ${text}`);
-      }
-
-      lastError = new RetryableProcessingError(
+    if (response.status === 429) {
+      throw new RetryableProcessingError(
         `Transcription gateway failed (${response.status}): ${text}`,
-        DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
-      );
-    } catch (error) {
-      if (error instanceof RetryableProcessingError) {
-        throw error;
-      }
-
-      if (error instanceof Error && error.message.includes("Transcription gateway failed")) {
-        throw error;
-      }
-
-      lastError = new RetryableProcessingError(
-        error instanceof Error ? error.message : String(error),
-        DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
+        parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_DELAY_SECONDS
       );
     }
-  }
 
-  throw lastError ?? new RetryableProcessingError("Transcription gateway failed after retries", DEFAULT_RETRY_DELAY_SECONDS);
+    if (!RETRYABLE_STATUS_CODES.has(response.status)) {
+      throw new Error(`Transcription gateway failed (${response.status}): ${text}`);
+    }
+
+    throw new RetryableProcessingError(
+      `Transcription gateway failed (${response.status}): ${text}`,
+      DEFAULT_RETRY_DELAY_SECONDS
+    );
+  } catch (error) {
+    if (error instanceof RetryableProcessingError) {
+      throw error;
+    }
+
+    if (error instanceof Error && error.message.includes("Transcription gateway failed")) {
+      throw error;
+    }
+
+    throw new RetryableProcessingError(
+      error instanceof Error ? error.message : String(error),
+      DEFAULT_RETRY_DELAY_SECONDS
+    );
+  }
 }
 
 export async function gatewayTranscription(

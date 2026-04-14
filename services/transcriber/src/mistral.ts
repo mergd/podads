@@ -26,11 +26,13 @@ const MISTRAL_STT_USD_PER_MINUTE = 0.003;
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
 export class MistralRetryableError extends Error {
+  statusCode: number;
   retryAfterSeconds?: number;
 
-  constructor(message: string, retryAfterSeconds?: number) {
+  constructor(message: string, statusCode: number, retryAfterSeconds?: number) {
     super(message);
     this.name = "MistralRetryableError";
+    this.statusCode = statusCode;
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }
@@ -98,6 +100,7 @@ export async function transcribeWithMistral(
     if (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504) {
       throw new MistralRetryableError(
         `Mistral ${response.status}: ${body}`,
+        response.status,
         parseRetryAfterSeconds(response.headers.get("retry-after"), body) ?? DEFAULT_RETRY_AFTER_SECONDS
       );
     }

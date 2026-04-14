@@ -42,6 +42,7 @@ export interface FeedRow {
   language: string | null;
   categories_json: string;
   metadata_json: string;
+  has_ads: number | null;
   status: FeedStatus;
   last_refreshed_at: string | null;
   last_error: string | null;

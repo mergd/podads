@@ -1,5 +1,6 @@
 import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 
+import { expireOldCleanedAudio } from "./lib/audioRetention";
 import { handleEpisodeJob, type EpisodeJobResult } from "./lib/processEpisode";
 import { stampRetryMessage } from "./lib/retryable";
 import { recoverStaleEpisodeJobs } from "./lib/staleJobs";
@@ -88,6 +89,15 @@ export default {
   },
 
   async scheduled(_event, env): Promise<void> {
-    await recoverStaleEpisodeJobs(env);
+    const staleJobRecovery = await recoverStaleEpisodeJobs(env);
+    const audioRetention = await expireOldCleanedAudio(env);
+
+    if (staleJobRecovery.recovered > 0) {
+      console.log("Recovered stale episode jobs.", staleJobRecovery);
+    }
+
+    if (audioRetention.deleted > 0) {
+      console.log("Expired old cleaned audio.", audioRetention);
+    }
   }
 } satisfies ExportedHandler<Env, EpisodeJobMessage>;

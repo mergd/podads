@@ -18,6 +18,7 @@ type PreviewSegment = {
 
 const TRANSCRIPT_PREVIEW_SEGMENT_LIMIT = 6;
 const OPENING_SIGNAL_WINDOW_MS = 5 * 60 * 1000;
+const NO_ADS_EPISODE_STREAK_THRESHOLD = 3;
 const SPONSOR_SIGNAL_PATTERNS = [
   { label: "brought_to_you_by", pattern: /\bbrought to you by\b/i },
   { label: "presented_by", pattern: /\bpresented by\b/i },
@@ -156,6 +157,33 @@ function parseProcessingDetails(value: string): ProcessingDetails {
   }
 }
 
+function parseFeedHasAdsState(value: unknown): boolean | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) {
+      return true;
+    }
+
+    if (value === 0) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function parseAdSpanCount(details: ProcessingDetails): number | null {
+  const value = details.adSpanCount;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function withProcessingSubstatus(
   details: ProcessingDetails,
   substatus: EpisodeProcessingSubstatus | null,
@@ -186,6 +214,66 @@ async function updateEpisodeProcessingDetails(
     .run();
 }
 
+async function loadRecentReadyEpisodeAdSpanCounts(
+  db: D1Database,
+  feedId: number,
+  limit: number
+): Promise<number[]> {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const rows = await db
+    .prepare(
+      `SELECT processing_details_json
+      FROM episodes
+      WHERE feed_id = ?1
+        AND processing_status = 'ready'
+      ORDER BY
+        COALESCE(pub_date_ms, CAST(strftime('%s', created_at) AS INTEGER) * 1000) DESC,
+        COALESCE(CAST(strftime('%s', last_processed_at) AS INTEGER) * 1000, -1) DESC,
+        CAST(strftime('%s', updated_at) AS INTEGER) * 1000 DESC,
+        id DESC
+      LIMIT ?2`
+    )
+    .bind(feedId, limit)
+    .all<{ processing_details_json: string }>();
+
+  return rows.results.flatMap((row) => {
+    const adSpanCount = parseAdSpanCount(parseProcessingDetails(row.processing_details_json));
+    return adSpanCount === null ? [] : [adSpanCount];
+  });
+}
+
+async function syncFeedHasAdsState(
+  db: D1Database,
+  feedId: number,
+  currentState: boolean | null,
+  updatedAt: string
+): Promise<boolean | null> {
+  const recentAdSpanCounts = await loadRecentReadyEpisodeAdSpanCounts(db, feedId, NO_ADS_EPISODE_STREAK_THRESHOLD);
+  const shouldMarkFeedNoAds =
+    recentAdSpanCounts.length === NO_ADS_EPISODE_STREAK_THRESHOLD
+    && recentAdSpanCounts.every((count) => count === 0);
+  const shouldMarkFeedHasAds = recentAdSpanCounts.some((count) => count > 0);
+  const nextState = shouldMarkFeedNoAds ? false : shouldMarkFeedHasAds ? true : currentState;
+
+  if (nextState === currentState) {
+    return currentState;
+  }
+
+  await db
+    .prepare(
+      `UPDATE feeds
+      SET has_ads = ?2, updated_at = ?3
+      WHERE id = ?1`
+    )
+    .bind(feedId, nextState === null ? null : nextState ? 1 : 0, updatedAt)
+    .run();
+
+  return nextState;
+}
+
 async function loadEpisode(db: D1Database, episodeId: number): Promise<EpisodeRecord | null> {
   const episode = await db
     .prepare(
@@ -195,8 +283,10 @@ async function loadEpisode(db: D1Database, episodeId: number): Promise<EpisodeRe
         episodes.title,
         feeds.title AS feed_title,
         feeds.slug AS feed_slug,
+        feeds.has_ads,
         episodes.source_enclosure_url,
         episodes.source_enclosure_type,
+        episodes.source_enclosure_length,
         episodes.processing_status,
         episodes.processing_details_json
       FROM episodes
@@ -261,6 +351,36 @@ async function markJobFailed(
     .run();
 }
 
+async function markJobSkipped(
+  db: D1Database,
+  message: EpisodeJobMessage,
+  processingDetailsJson: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE jobs
+      SET status = 'complete', last_error = NULL, updated_at = ?2
+      WHERE id = ?1`
+    )
+    .bind(message.jobId, now)
+    .run();
+
+  await db
+    .prepare(
+      `UPDATE episodes
+      SET
+        processing_status = 'skipped',
+        processing_details_json = ?2,
+        last_error = NULL,
+        last_processed_at = ?3,
+        updated_at = ?3
+      WHERE id = ?1`
+    )
+    .bind(message.episodeId, processingDetailsJson, now)
+    .run();
+}
+
 async function markJobQueuedForRetry(
   db: D1Database,
   message: EpisodeJobMessage,
@@ -290,7 +410,7 @@ async function markJobQueuedForRetry(
 async function markJobComplete(
   db: D1Database,
   message: EpisodeJobMessage,
-  cleanedEnclosureKey: string,
+  cleanedEnclosureKey: string | null,
   transcriptKey: string,
   adSpansKey: string,
   processingDetailsJson: string
@@ -348,6 +468,33 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
   const queueDelayMs = Date.now() - Date.parse(message.enqueuedAt);
   const processingStartedAt = new Date().toISOString();
   const baseProcessingDetails = parseProcessingDetails(episode.processing_details_json);
+  const feedHasAdsState = parseFeedHasAdsState(episode.has_ads);
+
+  if (feedHasAdsState === false) {
+    const skippedProcessingDetails = JSON.stringify(
+      withProcessingSubstatus(baseProcessingDetails, null, processingStartedAt, {
+        currentJobId: message.jobId,
+        enqueuedAt: message.enqueuedAt,
+        queueAttempt: message.pollAttempt ?? 0,
+        queueDelayMs: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
+        skippedAt: processingStartedAt,
+        skippedReason: "feed_marked_no_ads"
+      })
+    );
+
+    await markJobSkipped(env.DB, message, skippedProcessingDetails);
+    logEpisodeProcessingDiagnostics("info", "episode_skipped_no_ads_feed", episode.id, episode.feed_id, {
+      skippedReason: "feed_marked_no_ads"
+    });
+    await capturePostHogEvent(env, distinctId, "episode_processing_skipped", {
+      episode_id: episode.id,
+      feed_id: episode.feed_id,
+      reason: "feed_marked_no_ads",
+      queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null
+    });
+    return;
+  }
+
   let processingDetails = withProcessingSubstatus(baseProcessingDetails, "transcribing", processingStartedAt, {
     currentJobId: message.jobId,
     enqueuedAt: message.enqueuedAt,
@@ -450,6 +597,10 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
   const transcriptKey = `transcripts/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const adSpansKey = `ad-spans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const splicePlanKey = `splice-plans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
+  const sourceEnclosureLength =
+    episode.source_enclosure_length && /^\d+$/.test(episode.source_enclosure_length)
+      ? Number.parseInt(episode.source_enclosure_length, 10)
+      : null;
 
   await putJsonArtifact(env.AUDIO_BUCKET, transcriptKey, transcript, {
     episodeId: String(episode.id),
@@ -464,6 +615,7 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     env,
     episode.source_enclosure_url,
     episode.source_enclosure_type,
+    sourceEnclosureLength,
     episode.feed_id,
     episode.id,
     message.processingVersion,
@@ -539,6 +691,8 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     JSON.stringify(finalProcessingDetails)
   );
 
+  const nextFeedHasAdsState = await syncFeedHasAdsState(env.DB, episode.feed_id, feedHasAdsState, completedAt);
+
   await capturePostHogEvent(env, distinctId, "episode_processing_completed", {
     episode_id: episode.id,
     feed_id: episode.feed_id,
@@ -553,6 +707,7 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     removed_duration_ms: removedDurationMs,
     removed_ratio_of_source: removedRatioOfSource,
     removed_ratio_of_analyzed_audio: removedRatioOfAnalyzedAudio,
+    feed_has_ads: nextFeedHasAdsState,
     queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
     transcript_provider_queue_delay_ms: transcript.providerQueueDelayMs ?? null,
     transcript_provider_execution_ms: transcript.providerExecutionMs ?? null,

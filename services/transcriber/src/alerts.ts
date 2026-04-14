@@ -1,9 +1,9 @@
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL ?? "";
 const DISCORD_ALERT_COOLDOWN_SECONDS = Number(process.env.DISCORD_ALERT_COOLDOWN_SECONDS) || 1800;
 
-let lastGroqCapacityAlertAt = 0;
+let lastMistralCapacityAlertAt = 0;
 
-function shouldSendGroqCapacityAlert(): boolean {
+function shouldSendMistralCapacityAlert(): boolean {
   if (!DISCORD_WEBHOOK_URL) {
     return false;
   }
@@ -11,20 +11,20 @@ function shouldSendGroqCapacityAlert(): boolean {
   const now = Date.now();
   const cooldownMs = Math.max(60, DISCORD_ALERT_COOLDOWN_SECONDS) * 1000;
 
-  if ((now - lastGroqCapacityAlertAt) < cooldownMs) {
+  if ((now - lastMistralCapacityAlertAt) < cooldownMs) {
     return false;
   }
 
-  lastGroqCapacityAlertAt = now;
+  lastMistralCapacityAlertAt = now;
   return true;
 }
 
-export async function sendGroqCapacityAlert(input: {
-  keyCount: number;
+export async function sendMistralCapacityAlert(input: {
+  model: string;
   retryAfterSeconds?: number;
   errorMessage: string;
 }): Promise<void> {
-  if (!shouldSendGroqCapacityAlert()) {
+  if (!shouldSendMistralCapacityAlert()) {
     return;
   }
 
@@ -40,8 +40,8 @@ export async function sendGroqCapacityAlert(input: {
         username: "PodAds Alerts",
         content: [
           "PodAds transcription capacity alert",
-          `All configured Groq orgs are cooling down or rate limited.`,
-          `Configured org keys: ${input.keyCount}`,
+          `Mistral returned a 429 rate limit for transcription.`,
+          `Model: ${input.model}`,
           `Retry after: ${retryAfter}`,
           `Error: ${input.errorMessage}`
         ].join("\n")

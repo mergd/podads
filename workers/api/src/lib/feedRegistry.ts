@@ -586,12 +586,14 @@ export async function selectEpisodesForProcessing(
   const query = limit === undefined
     ? `SELECT episodes.id, episodes.duration
       FROM episodes
+      INNER JOIN feeds ON feeds.id = episodes.feed_id
       LEFT JOIN jobs AS active_jobs
         ON active_jobs.episode_id = episodes.id
         AND active_jobs.kind = 'episode.process'
         AND active_jobs.status IN ('queued', 'processing')
       ${EPISODE_JOB_ATTEMPTS_JOIN_SQL}
       WHERE episodes.feed_id = ?1
+        AND COALESCE(feeds.has_ads, 1) = 1
         AND ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
         AND active_jobs.id IS NULL
       ORDER BY
@@ -599,12 +601,14 @@ export async function selectEpisodesForProcessing(
         ${EPISODE_SORT_MS_SQL} DESC`
     : `SELECT episodes.id, episodes.duration
       FROM episodes
+      INNER JOIN feeds ON feeds.id = episodes.feed_id
       LEFT JOIN jobs AS active_jobs
         ON active_jobs.episode_id = episodes.id
         AND active_jobs.kind = 'episode.process'
         AND active_jobs.status IN ('queued', 'processing')
       ${EPISODE_JOB_ATTEMPTS_JOIN_SQL}
       WHERE episodes.feed_id = ?1
+        AND COALESCE(feeds.has_ads, 1) = 1
         AND ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
         AND active_jobs.id IS NULL
       ORDER BY
@@ -635,12 +639,14 @@ export async function selectGlobalPendingEpisodesForProcessing(
     .prepare(
       `SELECT episodes.id, episodes.feed_id, episodes.duration
       FROM episodes
+      INNER JOIN feeds ON feeds.id = episodes.feed_id
       LEFT JOIN jobs AS active_jobs
         ON active_jobs.episode_id = episodes.id
         AND active_jobs.kind = 'episode.process'
         AND active_jobs.status IN ('queued', 'processing')
       ${EPISODE_JOB_ATTEMPTS_JOIN_SQL}
-      WHERE ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
+      WHERE COALESCE(feeds.has_ads, 1) = 1
+        AND ${AUTOMATIC_EPISODE_SELECTION_FILTER_SQL}
         AND active_jobs.id IS NULL
       ORDER BY
         CASE episodes.processing_status WHEN 'pending' THEN 0 ELSE 1 END,

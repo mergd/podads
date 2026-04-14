@@ -11,7 +11,6 @@ import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
 const MAX_IN_MEMORY_AUDIO_REWRITE_BYTES = 30 * 1024 * 1024;
 const GATEWAY_TIMEOUT_MS = 290_000;
-const MAX_GATEWAY_RETRIES = 2;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504, 524]);
 
@@ -154,59 +153,79 @@ function buildPutOptions(contentType: string, adSpanCount: number, processingVer
   };
 }
 
+function createPassthroughManifest(contentType: string, adSpans: AdSpan[], note: string): AudioRewriteManifest {
+  return {
+    mode: "passthrough",
+    sourceContentType: contentType,
+    sourceDurationMs: null,
+    cleanedDurationMs: null,
+    requestedRemovedRanges: adSpans.map((span) => ({
+      startMs: span.startMs,
+      endMs: span.endMs
+    })),
+    actualRemovedRanges: [],
+    retainedRanges: [],
+    frameCount: null,
+    keptFrameCount: null,
+    notes: [note]
+  };
+}
+
+function createPassthroughResult(contentType: string, adSpans: AdSpan[], note: string): AudioRewriteResult {
+  return {
+    key: null,
+    bytesWritten: 0,
+    manifest: createPassthroughManifest(contentType, adSpans, note)
+  };
+}
+
 async function fetchRewriteFromGateway(url: string, gatewayToken: string | undefined, body: string): Promise<Response> {
-  let lastError: Error | null = null;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(gatewayToken ? { authorization: `Bearer ${gatewayToken}` } : {})
+      },
+      body,
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
+    });
 
-  for (let attempt = 0; attempt < MAX_GATEWAY_RETRIES; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(gatewayToken ? { authorization: `Bearer ${gatewayToken}` } : {})
-        },
-        body,
-        signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
-      });
+    if (response.ok) {
+      return response;
+    }
 
-      if (response.ok) {
-        return response;
-      }
+    const text = await response.text();
 
-      const text = await response.text();
-
-      if (response.status === 429) {
-        throw new RetryableProcessingError(
-          `Audio rewrite gateway failed (${response.status}): ${text}`,
-          parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_DELAY_SECONDS
-        );
-      }
-
-      if (!RETRYABLE_STATUS_CODES.has(response.status)) {
-        throw new Error(`Audio rewrite gateway failed (${response.status}): ${text}`);
-      }
-
-      lastError = new RetryableProcessingError(
+    if (response.status === 429) {
+      throw new RetryableProcessingError(
         `Audio rewrite gateway failed (${response.status}): ${text}`,
-        DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
-      );
-    } catch (error) {
-      if (error instanceof RetryableProcessingError) {
-        throw error;
-      }
-
-      if (error instanceof Error && error.message.includes("Audio rewrite gateway failed")) {
-        throw error;
-      }
-
-      lastError = new RetryableProcessingError(
-        error instanceof Error ? error.message : String(error),
-        DEFAULT_RETRY_DELAY_SECONDS * (attempt + 1)
+        parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_DELAY_SECONDS
       );
     }
-  }
 
-  throw lastError ?? new RetryableProcessingError("Audio rewrite gateway failed after retries", DEFAULT_RETRY_DELAY_SECONDS);
+    if (!RETRYABLE_STATUS_CODES.has(response.status)) {
+      throw new Error(`Audio rewrite gateway failed (${response.status}): ${text}`);
+    }
+
+    throw new RetryableProcessingError(
+      `Audio rewrite gateway failed (${response.status}): ${text}`,
+      DEFAULT_RETRY_DELAY_SECONDS
+    );
+  } catch (error) {
+    if (error instanceof RetryableProcessingError) {
+      throw error;
+    }
+
+    if (error instanceof Error && error.message.includes("Audio rewrite gateway failed")) {
+      throw error;
+    }
+
+    throw new RetryableProcessingError(
+      error instanceof Error ? error.message : String(error),
+      DEFAULT_RETRY_DELAY_SECONDS
+    );
+  }
 }
 
 async function rewriteAudioViaGateway(
@@ -266,11 +285,38 @@ export async function rewriteAudio(
   env: Env,
   sourceUrl: string,
   sourceContentType: string | null,
+  sourceContentLength: number | null,
   feedId: number,
   episodeId: number,
   processingVersion: string,
   adSpans: AdSpan[]
 ): Promise<AudioRewriteResult> {
+  if (adSpans.length === 0) {
+    return createPassthroughResult(
+      sourceContentType ?? "audio/mpeg",
+      adSpans,
+      "Skipped audio surgery because no ad spans were detected; serving the source enclosure avoids duplicating bytes in R2."
+    );
+  }
+
+  if (sourceContentType && !canSpliceMp3(sourceContentType)) {
+    return createPassthroughResult(
+      sourceContentType,
+      adSpans,
+      `Skipped audio surgery because ${sourceContentType} is not yet supported for frame-level splicing; serving the source enclosure avoids storing a passthrough copy.`
+    );
+  }
+
+  if (
+    sourceContentType
+    && canSpliceMp3(sourceContentType)
+    && sourceContentLength !== null
+    && sourceContentLength > MAX_IN_MEMORY_AUDIO_REWRITE_BYTES
+  ) {
+    const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extensionFromContentType(sourceContentType)}`;
+    return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans);
+  }
+
   const response = await fetch(sourceUrl, {
     headers: {
       "user-agent": "podads-bot/0.1"
@@ -285,69 +331,36 @@ export async function rewriteAudio(
   const contentLength = parseContentLength(response.headers.get("content-length"));
   const extension = extensionFromContentType(contentType);
   const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extension}`;
-  let manifest: AudioRewriteManifest = {
-    mode: "passthrough",
-    sourceContentType: contentType,
-    sourceDurationMs: null,
-    cleanedDurationMs: null,
-    requestedRemovedRanges: adSpans.map((span) => ({
-      startMs: span.startMs,
-      endMs: span.endMs
-    })),
-    actualRemovedRanges: [],
-    retainedRanges: [],
-    frameCount: null,
-    keptFrameCount: null,
-    notes: []
-  };
+  if (!canSpliceMp3(contentType)) {
+    return createPassthroughResult(
+      contentType,
+      adSpans,
+      `Skipped audio surgery because ${contentType} is not yet supported for frame-level splicing; serving the source enclosure avoids storing a passthrough copy.`
+    );
+  }
 
-  if (adSpans.length === 0) {
-    manifest.notes.push("Skipped audio surgery because no ad spans were detected.");
-    if (!response.body) {
-      throw new Error("Audio download succeeded without a readable body.");
-    }
-    await env.AUDIO_BUCKET.put(key, response.body, buildPutOptions(contentType, adSpans.length, processingVersion, manifest.mode));
+  if (contentLength !== null && contentLength > MAX_IN_MEMORY_AUDIO_REWRITE_BYTES) {
+    return rewriteAudioViaGateway(env, sourceUrl, contentType, key, processingVersion, adSpans);
+  }
+
+  try {
+    const arrayBuffer = await readArrayBufferWithLimit(response, MAX_IN_MEMORY_AUDIO_REWRITE_BYTES);
+    const rewritten = spliceMp3Audio(arrayBuffer, contentType, adSpans);
+    await env.AUDIO_BUCKET.put(
+      key,
+      rewritten.bytes,
+      buildPutOptions(contentType, adSpans.length, processingVersion, rewritten.manifest.mode)
+    );
     return {
       key,
-      bytesWritten: contentLength ?? 0,
-      manifest
+      bytesWritten: rewritten.bytes.byteLength,
+      manifest: rewritten.manifest
     };
-  } else if (!canSpliceMp3(contentType)) {
-    manifest.notes.push(`Skipped audio surgery because ${contentType} is not yet supported for frame-level splicing.`);
-    if (!response.body) {
-      throw new Error("Audio download succeeded without a readable body.");
-    }
-    await env.AUDIO_BUCKET.put(key, response.body, buildPutOptions(contentType, adSpans.length, processingVersion, manifest.mode));
-    return {
-      key,
-      bytesWritten: contentLength ?? 0,
-      manifest
-    };
-  } else {
-    if (contentLength !== null && contentLength > MAX_IN_MEMORY_AUDIO_REWRITE_BYTES) {
+  } catch (error) {
+    if (error instanceof OversizedAudioRewriteError) {
       return rewriteAudioViaGateway(env, sourceUrl, contentType, key, processingVersion, adSpans);
     }
 
-    try {
-      const arrayBuffer = await readArrayBufferWithLimit(response, MAX_IN_MEMORY_AUDIO_REWRITE_BYTES);
-      const rewritten = spliceMp3Audio(arrayBuffer, contentType, adSpans);
-      manifest = rewritten.manifest;
-      await env.AUDIO_BUCKET.put(
-        key,
-        rewritten.bytes,
-        buildPutOptions(contentType, adSpans.length, processingVersion, manifest.mode)
-      );
-      return {
-        key,
-        bytesWritten: rewritten.bytes.byteLength,
-        manifest
-      };
-    } catch (error) {
-      if (error instanceof OversizedAudioRewriteError) {
-        return rewriteAudioViaGateway(env, sourceUrl, contentType, key, processingVersion, adSpans);
-      }
-
-      throw error;
-    }
+    throw error;
   }
 }
