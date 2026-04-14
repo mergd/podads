@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { TRANSCRIPTION_AUDIO_BITRATE, TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ } from "./speedup.js";
+
 const execFileAsync = promisify(execFile);
 
 const MAX_CHUNK_BYTES = 24 * 1024 * 1024; // 24MB — stay under Groq's 25MB limit
@@ -57,8 +59,9 @@ export async function splitAudioIntoChunks(filePath: string): Promise<ChunkInfo[
       "-ss", String(offset),
       "-t", String(chunkDuration),
       "-i", filePath,
-      "-q:a", "4",
+      "-ar", String(TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ),
       "-ac", "1",
+      "-b:a", TRANSCRIPTION_AUDIO_BITRATE,
       chunkPath,
     ], { timeout: 60_000 });
 

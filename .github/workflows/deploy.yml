@@ -122,7 +122,6 @@ jobs:
           bun-version: 1.3.11
 
       - name: Deploy transcriber service
-        working-directory: services/transcriber
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: bunx @railway/cli up -s be92fc36-7b06-4b34-bc37-7f696f21514c
+        run: bunx @railway/cli up . -s be92fc36-7b06-4b34-bc37-7f696f21514c --ci

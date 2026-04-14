@@ -6,10 +6,15 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY package.json bun.lock* ./
+COPY packages/shared/package.json packages/shared/package.json
+COPY services/transcriber/package.json services/transcriber/package.json
 RUN bun install --production --frozen-lockfile || bun install --production
 
-COPY tsconfig.json ./
-COPY src/ src/
+COPY packages/shared/ packages/shared/
+COPY services/transcriber/tsconfig.json services/transcriber/tsconfig.json
+COPY services/transcriber/src/ services/transcriber/src/
+
+WORKDIR /app/services/transcriber
 
 ENV PORT=8000
 ENV SPEED_MULTIPLIER=2

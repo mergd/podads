@@ -12,7 +12,13 @@ import {
   type TranscriptionResult
 } from "./groq.js";
 import { MistralRetryableError, transcribeWithMistral } from "./mistral.js";
-import { cleanupFile, getFileSizeBytes, prepareAudioForTranscription } from "./speedup.js";
+import {
+  cleanupFile,
+  getFileSizeBytes,
+  prepareAudioForTranscription,
+  TRANSCRIPTION_AUDIO_BITRATE,
+  TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ
+} from "./speedup.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
@@ -36,6 +42,8 @@ app.get("/health", async () => ({
   mistral_configured: MISTRAL_API_KEY.length > 0,
   mistral_model: MISTRAL_MODEL,
   gateway_auth_enabled: GATEWAY_TOKEN.length > 0,
+  transcription_audio_bitrate: TRANSCRIPTION_AUDIO_BITRATE,
+  transcription_audio_sample_rate_hz: TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ,
 }));
 
 function isAuthorized(authHeader: string | undefined): boolean {

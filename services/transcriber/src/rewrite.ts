@@ -10,7 +10,7 @@ import {
   encodeManifestHeader,
   spliceMp3Audio,
   type AudioRewriteManifest
-} from "../../../packages/shared/src/audio.js";
+} from "@podads/shared/audio";
 
 import { downloadToTmp } from "./downloads.js";
 import { cleanupFile, getFileSizeBytes } from "./speedup.js";

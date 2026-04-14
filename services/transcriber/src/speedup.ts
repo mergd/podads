@@ -5,8 +5,12 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ = 16_000;
-const TRANSCRIPTION_AUDIO_BITRATE = "24k";
+const DEFAULT_TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ = 16_000;
+const DEFAULT_TRANSCRIPTION_AUDIO_BITRATE = "16k";
+
+export const TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ = Number(process.env.TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ)
+  || DEFAULT_TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ;
+export const TRANSCRIPTION_AUDIO_BITRATE = process.env.TRANSCRIPTION_AUDIO_BITRATE ?? DEFAULT_TRANSCRIPTION_AUDIO_BITRATE;
 
 export async function getFileSizeBytes(path: string): Promise<number> {
   return (await stat(path)).size;
