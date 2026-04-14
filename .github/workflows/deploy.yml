@@ -101,11 +101,15 @@ jobs:
           filters: |
             transcriber:
               - 'services/transcriber/**'
+              - 'packages/shared/**'
+              - '.github/workflows/deploy.yml'
+              - 'package.json'
+              - 'bun.lock'
 
   deploy-railway:
     runs-on: ubuntu-latest
     needs: [validate, check-railway-changes]
-    if: needs.check-railway-changes.outputs.changed == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.check-railway-changes.outputs.changed == 'true'
     permissions:
       contents: read
     steps:
