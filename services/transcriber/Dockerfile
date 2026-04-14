@@ -5,7 +5,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json bun.lock* ./
+COPY package.json ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY services/transcriber/package.json services/transcriber/package.json
 # Stub out the other workspace members so bun install doesn't error on missing dirs
