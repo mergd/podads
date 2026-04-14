@@ -33,13 +33,8 @@ jobs:
       - name: Typecheck workspace
         run: bun run typecheck
 
-      - name: Install transcriber deps
-        working-directory: services/transcriber
-        run: npm ci
-
       - name: Typecheck transcriber
-        working-directory: services/transcriber
-        run: npx tsc --noEmit
+        run: bun run --cwd services/transcriber typecheck
 
   deploy-cloudflare:
     runs-on: ubuntu-latest
@@ -70,7 +65,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler pages deploy ui/dist --project-name podads-ui
+        run: bunx wrangler pages deploy ui/dist --project-name podads-ui
 
       - name: Deploy API Worker
         uses: cloudflare/wrangler-action@v3.14.1
@@ -117,16 +112,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.2.0
         with:
-          node-version: 22
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
+          bun-version: 1.3.11
 
       - name: Deploy transcriber service
         working-directory: services/transcriber
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up -s be92fc36-7b06-4b34-bc37-7f696f21514c
+        run: bunx @railway/cli up -s be92fc36-7b06-4b34-bc37-7f696f21514c
