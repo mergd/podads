@@ -13,7 +13,7 @@ RUN mkdir -p ui workers/api workers/processor && \
     echo '{"name":"ui","private":true}' > ui/package.json && \
     echo '{"name":"@podads/api","private":true}' > workers/api/package.json && \
     echo '{"name":"@podads/processor","private":true}' > workers/processor/package.json
-RUN bun install --production --frozen-lockfile || bun install --production
+RUN bun install --production
 
 COPY packages/shared/ packages/shared/
 COPY services/transcriber/tsconfig.json services/transcriber/tsconfig.json
