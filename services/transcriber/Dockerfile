@@ -8,6 +8,11 @@ WORKDIR /app
 COPY package.json bun.lock* ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY services/transcriber/package.json services/transcriber/package.json
+# Stub out the other workspace members so bun install doesn't error on missing dirs
+RUN mkdir -p ui workers/api workers/processor && \
+    echo '{"name":"ui","private":true}' > ui/package.json && \
+    echo '{"name":"@podads/api","private":true}' > workers/api/package.json && \
+    echo '{"name":"@podads/processor","private":true}' > workers/processor/package.json
 RUN bun install --production --frozen-lockfile || bun install --production
 
 COPY packages/shared/ packages/shared/
