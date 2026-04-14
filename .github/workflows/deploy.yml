@@ -124,4 +124,4 @@ jobs:
       - name: Deploy transcriber service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: bunx @railway/cli up . -s be92fc36-7b06-4b34-bc37-7f696f21514c --ci
+        run: bunx @railway/cli up -s be92fc36-7b06-4b34-bc37-7f696f21514c --ci
