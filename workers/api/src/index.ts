@@ -32,7 +32,7 @@ const PREVIEW_EPISODE_LIMIT = 5;
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,OPTIONS",
-  "access-control-allow-headers": "content-type"
+  "access-control-allow-headers": "content-type,x-admin-secret"
 };
 
 function withCors(response: Response): Response {
@@ -369,6 +369,90 @@ function verifyAdminSecret(request: Request, env: Env): boolean {
   return Boolean(env.ADMIN_SECRET) && header === env.ADMIN_SECRET;
 }
 
+function countRowsToObject(rows: Array<{ count: number | string; status: string }>): Record<string, number> {
+  return Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
+}
+
+async function handleAdminStatus(request: Request, env: Env): Promise<Response> {
+  if (!verifyAdminSecret(request, env)) {
+    return unauthorized();
+  }
+
+  const [episodeCounts, jobCounts, queuedSummary, feedSummary] = await Promise.all([
+    env.DB
+      .prepare(
+        `SELECT processing_status AS status, COUNT(*) AS count
+        FROM episodes
+        GROUP BY processing_status`
+      )
+      .all<{ status: string; count: number | string }>(),
+    env.DB
+      .prepare(
+        `SELECT status, COUNT(*) AS count
+        FROM jobs
+        GROUP BY status`
+      )
+      .all<{ status: string; count: number | string }>(),
+    env.DB
+      .prepare(
+        `SELECT
+          COUNT(*) AS queued_count,
+          MIN(updated_at) AS oldest_updated_at,
+          MAX(updated_at) AS newest_updated_at,
+          SUM(
+            CASE
+              WHEN CAST(strftime('%s', 'now') AS INTEGER) - CAST(strftime('%s', updated_at) AS INTEGER) >= 2700
+              THEN 1
+              ELSE 0
+            END
+          ) AS stale_count
+        FROM jobs
+        WHERE status = 'queued'`
+      )
+      .first<{
+        queued_count: number | string;
+        oldest_updated_at: string | null;
+        newest_updated_at: string | null;
+        stale_count: number | string | null;
+      }>(),
+    env.DB
+      .prepare(
+        `SELECT
+          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
+          MAX(last_refreshed_at) AS last_refreshed_at
+        FROM feeds`
+      )
+      .first<{
+        error_count: number | string | null;
+        last_refreshed_at: string | null;
+      }>()
+  ]);
+
+  const oldestQueuedUpdatedAt = queuedSummary?.oldest_updated_at ?? null;
+  const oldestQueuedAgeMinutes = oldestQueuedUpdatedAt
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(oldestQueuedUpdatedAt)) / 60000))
+    : null;
+
+  return json({
+    generatedAt: new Date().toISOString(),
+    episodes: countRowsToObject(episodeCounts.results),
+    jobs: {
+      counts: countRowsToObject(jobCounts.results),
+      queued: {
+        count: Number(queuedSummary?.queued_count ?? 0),
+        staleCount: Number(queuedSummary?.stale_count ?? 0),
+        oldestUpdatedAt: oldestQueuedUpdatedAt,
+        oldestAgeMinutes: oldestQueuedAgeMinutes,
+        newestUpdatedAt: queuedSummary?.newest_updated_at ?? null
+      }
+    },
+    feeds: {
+      errorCount: Number(feedSummary?.error_count ?? 0),
+      lastRefreshedAt: feedSummary?.last_refreshed_at ?? null
+    }
+  });
+}
+
 async function handleAdminProcessPendingEpisodes(request: Request, env: Env): Promise<Response> {
   if (!verifyAdminSecret(request, env)) {
     return unauthorized();
@@ -492,6 +576,10 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/feeds/lookup") {
       return handleFeedLookup(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/admin/status") {
+      return handleAdminStatus(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/api/feeds/preview") {

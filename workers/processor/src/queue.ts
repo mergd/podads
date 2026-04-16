@@ -2,7 +2,7 @@ import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue"
 
 import { expireOldCleanedAudio } from "./lib/audioRetention";
 import { handleEpisodeJob, type EpisodeJobResult } from "./lib/processEpisode";
-import { stampRetryMessage } from "./lib/retryable";
+import { getNextRetryAttempt, getRetryDelaySeconds, stampRetryMessage } from "./lib/retryable";
 import { recoverStaleEpisodeJobs } from "./lib/staleJobs";
 import type { EpisodeJobMessage } from "./lib/types";
 
@@ -82,8 +82,10 @@ export default {
           continue;
         }
 
+        const nextRetryAttempt = getNextRetryAttempt(body.pollAttempt);
+        const delaySeconds = getRetryDelaySeconds(error, 30, nextRetryAttempt, body.episodeId);
         stampRetryMessage(body);
-        message.retry();
+        message.retry({ delaySeconds });
       }
     }
   },

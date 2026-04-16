@@ -384,6 +384,7 @@ async function markJobSkipped(
 async function markJobQueuedForRetry(
   db: D1Database,
   message: EpisodeJobMessage,
+  retryMessage: EpisodeJobMessage,
   errorMessage: string,
   processingDetailsJson: string
 ): Promise<void> {
@@ -391,10 +392,10 @@ async function markJobQueuedForRetry(
   await db
     .prepare(
       `UPDATE jobs
-      SET status = 'queued', last_error = ?2, updated_at = ?3
+      SET status = 'queued', last_error = ?2, payload_json = ?3, updated_at = ?4
       WHERE id = ?1`
     )
-    .bind(message.jobId, errorMessage, now)
+    .bind(message.jobId, errorMessage, JSON.stringify(retryMessage), now)
     .run();
 
   await db
@@ -743,23 +744,31 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     if (retryableError && !retryLimitReached) {
       const nextRetryAttempt = getNextRetryAttempt(message.pollAttempt);
       const delaySeconds = getRetryDelaySeconds(error, 60, nextRetryAttempt, message.episodeId);
+      const retryNotBeforeAt = new Date(Date.now() + (delaySeconds * 1000)).toISOString();
+      const retryMessage: EpisodeJobMessage = {
+        ...message,
+        enqueuedAt: now,
+        pollAttempt: nextRetryAttempt
+      };
       const retryProcessingDetails = JSON.stringify(
         withProcessingSubstatus({}, "retry_scheduled", now, {
           currentJobId: message.jobId,
           retryDelaySeconds: delaySeconds,
           retryScheduledAt: now,
+          retryNotBeforeAt,
           queueAttempt: nextRetryAttempt,
           processingAttemptCount,
           maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS
         })
       );
 
-      await markJobQueuedForRetry(env.DB, message, errorMessage, retryProcessingDetails);
+      await markJobQueuedForRetry(env.DB, message, retryMessage, errorMessage, retryProcessingDetails);
       await capturePostHogEvent(env, `episode:${message.episodeId}`, "episode_processing_retry_scheduled", {
         episode_id: message.episodeId,
         feed_id: message.feedId,
         error: errorMessage,
         retry_delay_seconds: delaySeconds,
+        retry_not_before_at: retryNotBeforeAt,
         processing_attempt_count: processingAttemptCount
       });
 

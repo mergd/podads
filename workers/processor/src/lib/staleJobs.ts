@@ -8,9 +8,11 @@ const MAX_STALE_SECONDS = 3 * 60 * 60;
 const STALE_BUFFER_SECONDS = 15 * 60;
 
 interface StaleJobRow {
+  attempts: number;
   id: string;
   episode_id: number | null;
   payload_json: string;
+  status: "processing" | "queued";
   updated_at: string;
 }
 
@@ -62,13 +64,21 @@ function isStale(updatedAt: string, staleAfterSeconds: number): boolean {
   return (Date.now() - updatedAtMs) >= (staleAfterSeconds * 1000);
 }
 
+function getConsumedAttemptCount(row: StaleJobRow, message: EpisodeJobMessage): number {
+  return Math.max(
+    row.attempts,
+    message.pollAttempt ?? 0,
+    row.status === "processing" ? 1 : 0
+  );
+}
+
 export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: number; episodeIds: number[] }> {
   const rows = await env.DB
     .prepare(
-      `SELECT id, episode_id, payload_json, updated_at
+      `SELECT id, episode_id, payload_json, updated_at, status, attempts
       FROM jobs
       WHERE kind = 'episode.process'
-        AND status = 'processing'`
+        AND status IN ('processing', 'queued')`
     )
     .all<StaleJobRow>();
 
@@ -90,15 +100,17 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
     }
 
     const now = new Date().toISOString();
-    const processingAttemptCount = Math.max(1, (message.pollAttempt ?? 0) + 1);
-    const retryLimitReached = processingAttemptCount >= MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS;
+    const consumedAttemptCount = getConsumedAttemptCount(row, message);
+    const retryLimitReached = consumedAttemptCount >= MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS;
     const retryMessage: EpisodeJobMessage = {
       ...message,
       jobId: crypto.randomUUID(),
       enqueuedAt: now,
-      pollAttempt: (message.pollAttempt ?? 0) + 1
+      pollAttempt: consumedAttemptCount
     };
-    const errorMessage = `Recovered stale processing job after ${staleAfterSeconds}s without completion.`;
+    const errorMessage = row.status === "processing"
+      ? `Recovered stale processing job after ${staleAfterSeconds}s without completion.`
+      : `Recovered stale queued job after ${staleAfterSeconds}s without queue progress.`;
     const queuedDetails = JSON.stringify({
       processingSubstatus: "queued",
       processingSubstatusUpdatedAt: now,
@@ -106,7 +118,8 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
       currentJobId: retryMessage.jobId,
       queueAttempt: retryMessage.pollAttempt ?? 0,
       recoveryReason: errorMessage,
-      processingAttemptCount: processingAttemptCount + 1,
+      recoveredFromJobStatus: row.status,
+      processingAttemptCount: consumedAttemptCount + 1,
       maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS
     });
     const failedDetails = JSON.stringify({
@@ -115,7 +128,8 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
       currentJobId: message.jobId,
       failedAt: now,
       queueAttempt: message.pollAttempt ?? 0,
-      processingAttemptCount,
+      recoveredFromJobStatus: row.status,
+      processingAttemptCount: consumedAttemptCount,
       maxAutomaticProcessingAttempts: MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS,
       recoveryReason: errorMessage,
       retryLimitReachedAt: now
@@ -128,14 +142,14 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
               .prepare(
                 `UPDATE jobs
                 SET status = 'failed', last_error = ?2, updated_at = ?3
-                WHERE id = ?1 AND status = 'processing'`
+                WHERE id = ?1 AND status = ?4`
               )
-              .bind(row.id, errorMessage, now),
+              .bind(row.id, errorMessage, now, row.status),
             env.DB
               .prepare(
                 `UPDATE episodes
                 SET processing_status = 'failed', processing_details_json = ?2, last_error = ?3, updated_at = ?4
-                WHERE id = ?1 AND processing_status = 'processing'`
+                WHERE id = ?1 AND processing_status IN ('processing', 'pending')`
               )
               .bind(episodeId, failedDetails, errorMessage, now)
           ]
@@ -144,14 +158,14 @@ export async function recoverStaleEpisodeJobs(env: Env): Promise<{ recovered: nu
               .prepare(
                 `UPDATE jobs
                 SET status = 'failed', last_error = ?2, updated_at = ?3
-                WHERE id = ?1 AND status = 'processing'`
+                WHERE id = ?1 AND status = ?4`
               )
-              .bind(row.id, errorMessage, now),
+              .bind(row.id, errorMessage, now, row.status),
             env.DB
               .prepare(
                 `UPDATE episodes
                 SET processing_status = 'pending', processing_details_json = ?2, last_error = ?3, updated_at = ?4
-                WHERE id = ?1 AND processing_status = 'processing'`
+                WHERE id = ?1 AND processing_status IN ('processing', 'pending')`
               )
               .bind(episodeId, queuedDetails, errorMessage, now)
           ]
