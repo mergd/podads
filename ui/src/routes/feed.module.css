@@ -310,7 +310,7 @@
     grid-template-columns: 1fr;
   }
 
-  .cover,
+  .coverWrap,
   .coverFallback {
     width: 5rem;
     height: 5rem;

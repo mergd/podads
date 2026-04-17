@@ -66,12 +66,10 @@ export function FeedPage() {
       <div className={styles.page}>
         <section className={styles.hero}>
           {previewImage ? (
-            <img
-              alt=""
-              className={styles.cover}
-              src={previewImage}
-              style={{ viewTransitionName: `feed-art-${slug}` }}
-            />
+            <div className={styles.coverWrap} style={{ viewTransitionName: `feed-art-${slug}` }}>
+              <img alt="" className={styles.cover} src={previewImage} />
+              <BrandCorner />
+            </div>
           ) : (
             <Skeleton variant="rounded" width="7rem" height="7rem" style={{ viewTransitionName: `feed-art-${slug}` }} />
           )}
