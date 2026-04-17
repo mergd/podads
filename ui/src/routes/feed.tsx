@@ -165,13 +165,13 @@ export function FeedPage() {
 
               return (
                 <article className={styles.episode} key={episode.id}>
-                  {episode.imageUrl ? (
-                    <div className={styles.episodeArtWrap}>
-                      <img alt="" className={styles.episodeArt} loading="lazy" src={episode.imageUrl} />
-                    </div>
-                  ) : null}
                   <div className={styles.episodeContent}>
                     <div className={styles.episodeTitleRow}>
+                      {episode.imageUrl ? (
+                        <div className={styles.episodeArtWrap}>
+                          <img alt="" className={styles.episodeArt} loading="lazy" src={episode.imageUrl} />
+                        </div>
+                      ) : null}
                       <Link className={styles.episodeTitleLink} state={{ title: episode.title, imageUrl: episode.imageUrl ?? detail.feed.imageUrl, feedTitle: detail.feed.title }} to={`/${episode.feedSlug}/episodes/${episode.id}`} viewTransition>
                         <h3
                           className={styles.episodeName}

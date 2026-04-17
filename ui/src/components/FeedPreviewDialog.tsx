@@ -98,6 +98,22 @@ export function FeedPreviewDialog({
             </div>
           </div>
         ) : null}
+
+        {preview && !isLoading && !errorMessage ? (
+          <div className={styles.mobileActions}>
+            <Button className={styles.secondaryButton} onClick={onClose} type="button">
+              Cancel
+            </Button>
+            <Button
+              className={styles.primaryButton}
+              disabled={isSubmitting}
+              onClick={() => { void onConfirm(); }}
+              type="button"
+            >
+              {isSubmitting ? "Creating..." : "Create ad-free feed"}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

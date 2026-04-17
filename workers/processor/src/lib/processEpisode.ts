@@ -4,7 +4,7 @@ import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue"
 import { detectAdSpans } from "./adDetection";
 import { rewriteAudio } from "./audioRewrite";
 import { notifyEpisodeProcessingFailure } from "./discord";
-import { capturePostHogEvent } from "./posthog";
+import { capturePostHogAiGeneration, capturePostHogEvent } from "./posthog";
 import { getNextRetryAttempt, getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
 import { generateTranscript } from "./transcription";
 import type { AdSpan, AudioRewriteManifest, EpisodeJobMessage, EpisodeRecord, TranscriptResult } from "./types";
@@ -523,7 +523,26 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     total_tokens: transcript.totalTokens,
     queue_delay_ms: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
     episode_id: episode.id,
-    feed_id: episode.feed_id
+    feed_id: episode.feed_id,
+    feed_title: episode.feed_title ?? null,
+    feed_slug: episode.feed_slug ?? null
+  });
+  await capturePostHogAiGeneration(env, distinctId, {
+    traceId: `episode:${episode.id}`,
+    spanName: "transcription",
+    provider: transcript.provider,
+    model: transcript.model,
+    inputTokens: transcript.promptTokens ?? null,
+    outputTokens: transcript.completionTokens ?? null,
+    totalTokens: transcript.totalTokens ?? null,
+    totalCostUsd: transcript.estimatedCostUsd ?? null,
+    latencySeconds:
+      typeof transcript.requestDurationMs === "number" ? transcript.requestDurationMs / 1000 : null,
+    feedId: episode.feed_id,
+    feedTitle: episode.feed_title ?? null,
+    feedSlug: episode.feed_slug ?? null,
+    episodeId: episode.id,
+    episodeTitle: episode.title ?? null
   });
 
   {
@@ -580,7 +599,26 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     completion_tokens: detection.completionTokens,
     total_tokens: detection.totalTokens,
     episode_id: episode.id,
-    feed_id: episode.feed_id
+    feed_id: episode.feed_id,
+    feed_title: episode.feed_title ?? null,
+    feed_slug: episode.feed_slug ?? null
+  });
+  await capturePostHogAiGeneration(env, distinctId, {
+    traceId: `episode:${episode.id}`,
+    spanName: "ad_detection",
+    provider: detection.provider,
+    model: detection.model,
+    inputTokens: detection.promptTokens ?? null,
+    outputTokens: detection.completionTokens ?? null,
+    totalTokens: detection.totalTokens ?? null,
+    totalCostUsd: detection.estimatedCostUsd ?? null,
+    latencySeconds:
+      typeof detection.requestDurationMs === "number" ? detection.requestDurationMs / 1000 : null,
+    feedId: episode.feed_id,
+    feedTitle: episode.feed_title ?? null,
+    feedSlug: episode.feed_slug ?? null,
+    episodeId: episode.id,
+    episodeTitle: episode.title ?? null
   });
 
   {

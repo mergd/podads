@@ -13,6 +13,7 @@
   position: relative;
   width: min(100%, 52rem);
   max-height: min(92vh, 48rem);
+  max-height: min(92dvh, 48rem);
   display: grid;
   overflow: hidden;
   border-radius: var(--radius-xl);
@@ -263,41 +264,105 @@
 @media (max-width: 640px) {
   .backdrop {
     padding: 0;
+    align-items: flex-end;
+    backdrop-filter: blur(6px);
   }
 
   .dialog {
     width: 100%;
-    max-height: 100vh;
-    border-radius: 0;
+    max-width: 100%;
+    height: 92dvh;
+    max-height: 92dvh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .closeButton {
+    top: var(--space-3);
+    right: var(--space-3);
+    width: 2.25rem;
+    height: 2.25rem;
+    background: var(--color-surface-soft);
   }
 
   .columns {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .detailCol {
+    display: block;
+    padding: var(--space-5);
+    padding-top: calc(var(--space-6) + 1.5rem);
     border-right: none;
     border-bottom: 1px solid var(--color-border);
-    padding: var(--space-5);
+    overflow: visible;
   }
 
-  .actions {
-    flex-direction: row;
+  .detailInner {
+    gap: var(--space-3);
   }
 
-  .art {
-    width: 5rem;
-    height: 5rem;
-  }
-
+  .art,
   .artPlaceholder {
-    width: 5rem;
-    height: 5rem;
+    width: 5.5rem;
+    height: 5.5rem;
+  }
+
+  .title {
+    font-size: var(--text-h3, 1.35rem);
+    padding-right: 2.5rem;
+  }
+
+  .description {
+    -webkit-line-clamp: 4;
+  }
+
+  /* Footer actions become a sticky bar below the scroll area */
+  .actions {
+    display: none;
   }
 
   .episodeCol {
     padding: var(--space-5);
-    max-height: 50vh;
+    padding-bottom: calc(var(--space-5) + 5rem);
+    background: var(--color-bg-inset);
+    overflow: visible;
+  }
+
+  .sectionTitle {
+    position: static;
+  }
+
+  /* Mobile sticky footer — rendered via .mobileActions in the dialog root */
+  .mobileActions {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) max(var(--space-3), env(safe-area-inset-bottom));
+    background: var(--color-bg-elevated);
+    border-top: 1px solid var(--color-border);
+    z-index: 3;
+  }
+
+  .mobileActions .secondaryButton,
+  .mobileActions .primaryButton {
+    flex: 1;
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-body);
+  }
+}
+
+@media (min-width: 641px) {
+  .mobileActions {
+    display: none;
   }
 }
