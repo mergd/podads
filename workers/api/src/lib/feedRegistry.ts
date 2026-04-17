@@ -903,17 +903,27 @@ export async function getEpisodeTranscriptMetadata(
   db: D1Database,
   slug: string,
   episodeId: number
-): Promise<{ transcriptKey: string; episodeId: number; feedSlug: string } | null> {
+): Promise<{
+  transcriptKey: string;
+  adSpansKey: string | null;
+  episodeId: number;
+  feedSlug: string;
+} | null> {
   const episode = await db
     .prepare(
-      `SELECT episodes.id, episodes.transcript_key, feeds.slug AS feed_slug
+      `SELECT episodes.id, episodes.transcript_key, episodes.ad_spans_key, feeds.slug AS feed_slug
       FROM episodes
       INNER JOIN feeds ON feeds.id = episodes.feed_id
       WHERE feeds.slug = ?1 AND episodes.id = ?2
       LIMIT 1`
     )
     .bind(slug, episodeId)
-    .first<{ id: number; transcript_key: string | null; feed_slug: string }>();
+    .first<{
+      id: number;
+      transcript_key: string | null;
+      ad_spans_key: string | null;
+      feed_slug: string;
+    }>();
 
   if (!episode?.transcript_key) {
     return null;
@@ -921,6 +931,7 @@ export async function getEpisodeTranscriptMetadata(
 
   return {
     transcriptKey: episode.transcript_key,
+    adSpansKey: episode.ad_spans_key,
     episodeId: episode.id,
     feedSlug: episode.feed_slug
   };

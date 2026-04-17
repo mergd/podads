@@ -388,6 +388,60 @@ async function handleAudio(request: Request, env: Env, slug: string, episodeId: 
   return withCors(new Response(object.body, { status: 200, headers }));
 }
 
+interface AdSpanRange {
+  startMs: number;
+  endMs: number;
+}
+
+async function loadAdSpans(env: Env, key: string | null): Promise<AdSpanRange[]> {
+  if (!key) {
+    return [];
+  }
+
+  const object = await env.AUDIO_BUCKET.get(key);
+  if (!object) {
+    return [];
+  }
+
+  const payload = (await object.json()) as { spans?: Array<{ startMs?: number; endMs?: number }> };
+  if (!Array.isArray(payload.spans)) {
+    return [];
+  }
+
+  const spans: AdSpanRange[] = [];
+  for (const span of payload.spans) {
+    if (typeof span?.startMs === "number" && typeof span.endMs === "number" && span.endMs > span.startMs) {
+      spans.push({ startMs: span.startMs, endMs: span.endMs });
+    }
+  }
+
+  return spans.sort((left, right) => left.startMs - right.startMs);
+}
+
+function removedMsBefore(spans: AdSpanRange[], timeMs: number): number {
+  let removed = 0;
+  for (const span of spans) {
+    if (span.endMs <= timeMs) {
+      removed += span.endMs - span.startMs;
+    } else if (span.startMs < timeMs) {
+      removed += timeMs - span.startMs;
+    } else {
+      break;
+    }
+  }
+  return removed;
+}
+
+function isInsideAdSpan(spans: AdSpanRange[], startMs: number, endMs: number): boolean {
+  const midpoint = (startMs + endMs) / 2;
+  for (const span of spans) {
+    if (midpoint >= span.startMs && midpoint < span.endMs) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function handleEpisodeTranscript(env: Env, slug: string, episodeId: number): Promise<Response> {
   const metadata = await getEpisodeTranscriptMetadata(env.DB, slug, episodeId);
 
@@ -410,33 +464,49 @@ async function handleEpisodeTranscript(env: Env, slug: string, episodeId: number
     segments?: Array<{ startMs?: number; endMs?: number; text?: string }>;
   };
 
+  const adSpans = await loadAdSpans(env, metadata.adSpansKey);
+  const totalRemovedMs = adSpans.reduce((sum, span) => sum + (span.endMs - span.startMs), 0);
+
+  const rawSegments = Array.isArray(transcript.segments) ? transcript.segments : [];
+  const cleanedSegments: EpisodeTranscriptResponse["segments"] = [];
+  const cleanedTextParts: string[] = [];
+
+  for (const segment of rawSegments) {
+    if (
+      typeof segment?.startMs !== "number" ||
+      typeof segment.endMs !== "number" ||
+      typeof segment.text !== "string"
+    ) {
+      continue;
+    }
+
+    if (isInsideAdSpan(adSpans, segment.startMs, segment.endMs)) {
+      continue;
+    }
+
+    const shiftStart = removedMsBefore(adSpans, segment.startMs);
+    const shiftEnd = removedMsBefore(adSpans, segment.endMs);
+    cleanedSegments.push({
+      startMs: Math.max(0, segment.startMs - shiftStart),
+      endMs: Math.max(0, segment.endMs - shiftEnd),
+      text: segment.text
+    });
+    cleanedTextParts.push(segment.text);
+  }
+
+  const rawAnalyzedDurationMs =
+    typeof transcript.analyzedDurationMs === "number" ? transcript.analyzedDurationMs : 0;
+  const analyzedDurationMs = Math.max(0, rawAnalyzedDurationMs - totalRemovedMs);
+
   const response: EpisodeTranscriptResponse = {
     episodeId: metadata.episodeId,
     feedSlug: metadata.feedSlug,
     provider: transcript.provider ?? "unknown",
     model: transcript.model ?? "unknown",
-    text: transcript.text ?? "",
+    text: adSpans.length > 0 ? cleanedTextParts.join(" ").trim() : transcript.text ?? "",
     analysisTruncated: Boolean(transcript.analysisTruncated),
-    analyzedDurationMs: typeof transcript.analyzedDurationMs === "number" ? transcript.analyzedDurationMs : 0,
-    segments: Array.isArray(transcript.segments)
-      ? transcript.segments.flatMap((segment) => {
-          if (
-            typeof segment?.startMs !== "number" ||
-            typeof segment.endMs !== "number" ||
-            typeof segment.text !== "string"
-          ) {
-            return [];
-          }
-
-          return [
-            {
-              startMs: segment.startMs,
-              endMs: segment.endMs,
-              text: segment.text
-            }
-          ];
-        })
-      : []
+    analyzedDurationMs,
+    segments: cleanedSegments
   };
 
   return json(response);

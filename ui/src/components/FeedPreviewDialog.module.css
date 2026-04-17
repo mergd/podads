@@ -71,15 +71,16 @@
   position: relative;
   width: 10rem;
   height: 10rem;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   container-type: inline-size;
+  box-shadow: var(--shadow-md);
 }
 
 .art {
   width: 100%;
   height: 100%;
-  border-radius: var(--radius-lg);
   object-fit: cover;
-  box-shadow: var(--shadow-md);
   display: block;
 }
 

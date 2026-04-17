@@ -1,27 +1,28 @@
 .badge {
   position: absolute;
-  right: 6%;
-  bottom: 6%;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 22%;
-  max-width: 1.75rem;
-  min-width: 0.9rem;
+  right: 0;
+  bottom: 0;
+  width: 32%;
   aspect-ratio: 1;
-  border-radius: var(--radius-sm);
-  background: var(--gradient-button);
-  box-shadow: var(--shadow-button), 0 0 0 2px rgb(255 255 255 / 0.9);
+  max-width: 3rem;
+  min-width: 1.1rem;
+  display: grid;
+  justify-items: end;
+  align-items: end;
+  padding: 0 7% 5% 0;
   color: #fff;
   font-family: inherit;
   font-weight: 800;
-  font-size: clamp(0.55rem, 12cqi, 0.95rem);
+  font-size: clamp(0.55rem, 13cqi, 1rem);
   line-height: 1;
-  letter-spacing: -0.02em;
-  user-select: none;
+  letter-spacing: -0.03em;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  background: linear-gradient(135deg, transparent 42%, rgb(0 0 0 / 0.55) 100%);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
   pointer-events: none;
+  user-select: none;
 }
 
-.badge::before {
+.badge::after {
   content: "P";
 }
