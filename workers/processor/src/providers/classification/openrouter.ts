@@ -8,7 +8,7 @@ import { RetryableProcessingError } from "../../lib/retryable";
 import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 
 export const OPENROUTER_CLASSIFICATION_MODEL = "google/gemini-3.1-flash-lite-preview";
-export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "qwen/qwen3.6-plus";
+export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "openai/gpt-5.4-mini";
 const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
 
 export interface AdClassificationPromptOptions {
@@ -18,26 +18,35 @@ export interface AdClassificationPromptOptions {
 
 interface OpenRouterClassificationPayload {
   spans: Array<{
-    startMs: number;
-    endMs: number;
+    startIdx: number;
+    endIdx: number;
     confidence: number;
     reason: string;
   }>;
 }
 
-function getConfiguredModel(value: string | undefined, fallback: string): string {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+function sanitizeSegmentText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
-function getClassificationModels(env: Env): string[] {
-  const configuredModels = [
-    getConfiguredModel(env.OPENROUTER_CLASSIFICATION_MODEL, OPENROUTER_CLASSIFICATION_MODEL),
-    getConfiguredModel(env.OPENROUTER_CLASSIFICATION_FALLBACK_MODEL, OPENROUTER_CLASSIFICATION_FALLBACK_MODEL)
-  ];
-
-  return configuredModels.filter((model, index) => configuredModels.indexOf(model) === index);
+function formatSeconds(ms: number): string {
+  return (ms / 1000).toFixed(1);
 }
+
+function buildSegmentLines(transcript: TranscriptResult): string {
+  return transcript.segments
+    .map((segment, index) => {
+      const start = formatSeconds(segment.startMs);
+      const end = formatSeconds(segment.endMs);
+      return `${index}\t${start}\t${end}\t${sanitizeSegmentText(segment.text)}`;
+    })
+    .join("\n");
+}
+
+const CLASSIFICATION_MODELS = [
+  OPENROUTER_CLASSIFICATION_MODEL,
+  OPENROUTER_CLASSIFICATION_FALLBACK_MODEL
+] as const;
 
 export function buildAdClassificationPrompt(
   transcript: TranscriptResult,
@@ -46,11 +55,6 @@ export function buildAdClassificationPrompt(
   const maxSpanDurationMinutes = options.maxSpanDurationMs
     ? Math.round(options.maxSpanDurationMs / 60_000)
     : null;
-  const segments = transcript.segments.map((segment) => ({
-    startMs: segment.startMs,
-    endMs: segment.endMs,
-    text: segment.text
-  }));
   const prerollInstructions = options.mentionPrerolls
     ? [
         `Prerolls are common and often appear in the first ${DEFAULT_PREROLL_WINDOW_SECONDS} seconds before the show really starts.`,
@@ -61,6 +65,8 @@ export function buildAdClassificationPrompt(
   return [
     "Identify paid advertising spans in this podcast transcript.",
     "Return JSON only.",
+    "Segments are provided as TSV lines: `index<TAB>startSec<TAB>endSec<TAB>text`. Times are in seconds.",
+    "For each ad span, return the inclusive `startIdx` and `endIdx` referring to those segment indices.",
     "Only include host-read ads, sponsorship reads, promo codes, partner messaging, or explicit product promotions.",
     "Do not include editorial chatter, intro, outro, or self-referential jokes unless clearly promotional.",
     "When an ad pod is concentrated in one block, prefer the net start and net end of the whole promotional block rather than splitting it into evenly spaced micro-spans.",
@@ -68,31 +74,44 @@ export function buildAdClassificationPrompt(
     "Ad pods often land near round durations such as about 30s, 60s, 90s, 120s, or 180s. Use that only as a weak prior when the transcript supports it, not as a hard rule.",
     ...(maxSpanDurationMinutes === null
       ? []
-      : [
-          `No single returned span may exceed ${maxSpanDurationMinutes} minutes.`,
-          `Sanity check: if a suspected ad block appears to run longer than ${maxSpanDurationMinutes} minutes, narrow the span to the most clearly promotional section instead of returning the entire block.`
-        ]),
+      : [`No single returned span may exceed ${maxSpanDurationMinutes} minutes.`]),
     "Confidence must be between 0 and 1.",
     "Prefer fewer high-confidence spans over many weak guesses.",
     ...prerollInstructions,
     "",
-    JSON.stringify({ segments })
+    buildSegmentLines(transcript)
   ].join("\n");
 }
 
-function normalizeOpenRouterSpans(payload: OpenRouterClassificationPayload): AdDetectionResult["spans"] {
+function normalizeOpenRouterSpans(
+  payload: OpenRouterClassificationPayload,
+  transcript: TranscriptResult
+): AdDetectionResult["spans"] {
+  const lastIndex = transcript.segments.length - 1;
+
   return payload.spans
-    .filter((span) => typeof span.startMs === "number" && typeof span.endMs === "number")
-    .map((span) => ({
-      startMs: Math.max(0, Math.round(span.startMs)),
-      endMs: Math.max(0, Math.round(span.endMs)),
-      confidence:
-        typeof span.confidence === "number" && Number.isFinite(span.confidence)
-          ? Math.max(0, Math.min(1, span.confidence))
-          : 0.5,
-      reason: typeof span.reason === "string" && span.reason.length > 0 ? span.reason : "openrouter_classification"
-    }))
-    .filter((span) => span.endMs > span.startMs);
+    .filter((span) => Number.isFinite(span.startIdx) && Number.isFinite(span.endIdx))
+    .map((span) => {
+      const startIdx = Math.max(0, Math.min(lastIndex, Math.round(span.startIdx)));
+      const endIdx = Math.max(startIdx, Math.min(lastIndex, Math.round(span.endIdx)));
+      const startSegment = transcript.segments[startIdx];
+      const endSegment = transcript.segments[endIdx];
+
+      if (!startSegment || !endSegment) {
+        return null;
+      }
+
+      return {
+        startMs: Math.max(0, Math.round(startSegment.startMs)),
+        endMs: Math.max(0, Math.round(endSegment.endMs)),
+        confidence:
+          typeof span.confidence === "number" && Number.isFinite(span.confidence)
+            ? Math.max(0, Math.min(1, span.confidence))
+            : 0.5,
+        reason: typeof span.reason === "string" && span.reason.length > 0 ? span.reason : "openrouter_classification"
+      };
+    })
+    .filter((span): span is AdDetectionResult["spans"][number] => span !== null && span.endMs > span.startMs);
 }
 
 export async function runOpenRouterClassificationModel(
@@ -119,13 +138,13 @@ export async function runOpenRouterClassificationModel(
               items: {
                 type: "object",
                 additionalProperties: false,
-                required: ["startMs", "endMs", "confidence", "reason"],
+                required: ["startIdx", "endIdx", "confidence", "reason"],
                 properties: {
-                  startMs: {
-                    type: "number"
+                  startIdx: {
+                    type: "integer"
                   },
-                  endMs: {
-                    type: "number"
+                  endIdx: {
+                    type: "integer"
                   },
                   confidence: {
                     type: "number"
@@ -148,7 +167,7 @@ export async function runOpenRouterClassificationModel(
     ]
   });
   const parsed = parseStructuredOutput<OpenRouterClassificationPayload>(payload);
-  const spans = normalizeOpenRouterSpans(parsed);
+  const spans = normalizeOpenRouterSpans(parsed, transcript);
 
   return {
     provider: "openrouter",
@@ -167,7 +186,7 @@ export async function openRouterClassification(
   transcript: TranscriptResult,
   options: AdClassificationPromptOptions = {}
 ): Promise<AdDetectionResult> {
-  const models = getClassificationModels(env);
+  const models = CLASSIFICATION_MODELS;
   const classificationOptions = {
     mentionPrerolls: true,
     ...options

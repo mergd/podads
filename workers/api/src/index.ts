@@ -277,6 +277,50 @@ async function handleRss(request: Request, env: Env, slug: string): Promise<Resp
   return text(rss, 200, "application/rss+xml; charset=utf-8");
 }
 
+function parseRangeHeader(value: string | null, size: number): { offset: number; length: number } | null {
+  if (!value) {
+    return null;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const startStr = match[1] ?? "";
+  const endStr = match[2] ?? "";
+
+  if (startStr === "" && endStr === "") {
+    return null;
+  }
+
+  if (startStr === "") {
+    const suffix = Number(endStr);
+    if (!Number.isFinite(suffix) || suffix <= 0) {
+      return null;
+    }
+    const length = Math.min(suffix, size);
+    return { offset: size - length, length };
+  }
+
+  const offset = Number(startStr);
+  if (!Number.isFinite(offset) || offset < 0 || offset >= size) {
+    return null;
+  }
+
+  if (endStr === "") {
+    return { offset, length: size - offset };
+  }
+
+  const end = Number(endStr);
+  if (!Number.isFinite(end) || end < offset) {
+    return { offset, length: size - offset };
+  }
+
+  const clampedEnd = Math.min(end, size - 1);
+  return { offset, length: clampedEnd - offset + 1 };
+}
+
 async function handleAudio(request: Request, env: Env, slug: string, episodeId: number): Promise<Response> {
   const audio = await getEpisodeAudioSource(env.DB, slug, episodeId);
 
@@ -288,22 +332,57 @@ async function handleAudio(request: Request, env: Env, slug: string, episodeId: 
     return Response.redirect(audio.sourceUrl, 302);
   }
 
-  const object = await env.AUDIO_BUCKET.get(audio.cleanedKey);
+  const isHead = request.method === "HEAD";
 
+  const head = await env.AUDIO_BUCKET.head(audio.cleanedKey);
+  if (!head) {
+    return Response.redirect(audio.sourceUrl, 302);
+  }
+
+  const totalSize = head.size;
+  const range = parseRangeHeader(request.headers.get("range"), totalSize);
+
+  const headers = new Headers();
+  head.writeHttpMetadata(headers);
+  headers.set("content-type", headers.get("content-type") ?? "audio/mpeg");
+  headers.set("accept-ranges", "bytes");
+  headers.set("cache-control", "public, max-age=300");
+  if (head.etag) {
+    headers.set("etag", `"${head.etag}"`);
+  }
+
+  if (range) {
+    const end = range.offset + range.length - 1;
+    headers.set("content-range", `bytes ${range.offset}-${end}/${totalSize}`);
+    headers.set("content-length", String(range.length));
+
+    if (isHead) {
+      return withCors(new Response(null, { status: 206, headers }));
+    }
+
+    const ranged = await env.AUDIO_BUCKET.get(audio.cleanedKey, {
+      range: { offset: range.offset, length: range.length }
+    });
+
+    if (!ranged) {
+      return Response.redirect(audio.sourceUrl, 302);
+    }
+
+    return withCors(new Response(ranged.body, { status: 206, headers }));
+  }
+
+  headers.set("content-length", String(totalSize));
+
+  if (isHead) {
+    return withCors(new Response(null, { status: 200, headers }));
+  }
+
+  const object = await env.AUDIO_BUCKET.get(audio.cleanedKey);
   if (!object) {
     return Response.redirect(audio.sourceUrl, 302);
   }
 
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("content-type", headers.get("content-type") ?? "audio/mpeg");
-  headers.set("cache-control", "public, max-age=300");
-
-  return withCors(
-    new Response(object.body, {
-      headers
-    })
-  );
+  return withCors(new Response(object.body, { status: 200, headers }));
 }
 
 async function handleEpisodeTranscript(env: Env, slug: string, episodeId: number): Promise<Response> {
