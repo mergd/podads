@@ -32,9 +32,25 @@ export function ShowsPage() {
         </div>
       ) : feeds.length === 0 ? (
         <div className={styles.empty}>
-          {query
-            ? `No shows matching "${query}"`
-            : "No shows registered yet. Register a feed from the home page."}
+          {query ? (
+            <>
+              <p className={styles.emptyTitle}>No shows matching &ldquo;{query}&rdquo;</p>
+              <p className={styles.emptyHint}>
+                Find it on{" "}
+                <a
+                  className={styles.emptyLink}
+                  href={`https://podcastaddict.com/?q=${encodeURIComponent(query)}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Podcast Addict
+                </a>
+                , grab the RSS link, then add it from the home page.
+              </p>
+            </>
+          ) : (
+            "No shows registered yet. Register a feed from the home page."
+          )}
         </div>
       ) : (
         <div className={styles.grid}>
