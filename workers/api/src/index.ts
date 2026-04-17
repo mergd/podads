@@ -79,22 +79,25 @@ function badRequest(message: string): Response {
   return json({ error: message }, 400);
 }
 
+const DEFAULT_APP_BASE_URL = "https://podads.yet-to-be.com";
+const DEFAULT_UI_BASE_URL = "https://podads.yet-to-be.com";
+
 function getBaseUrl(request: Request, env: Env): string {
-  const requestUrl = new URL(request.url);
-  if (requestUrl.hostname === "localhost" || requestUrl.hostname === "127.0.0.1") {
-    return env.APP_BASE_URL;
+  const override = env.APP_BASE_URL?.trim();
+  if (override) {
+    return override;
   }
 
-  return requestUrl.origin;
+  const requestUrl = new URL(request.url);
+  if (requestUrl.hostname === "localhost" || requestUrl.hostname === "127.0.0.1") {
+    return requestUrl.origin;
+  }
+
+  return DEFAULT_APP_BASE_URL;
 }
 
-function getUiBaseUrl(request: Request, env: Env): string {
-  const requestUrl = new URL(request.url);
-  if (requestUrl.hostname === "localhost" || requestUrl.hostname === "127.0.0.1") {
-    return env.PUBLIC_UI_BASE_URL;
-  }
-
-  return env.PUBLIC_UI_BASE_URL;
+function getUiBaseUrl(_request: Request, env: Env): string {
+  return env.PUBLIC_UI_BASE_URL?.trim() || DEFAULT_UI_BASE_URL;
 }
 
 async function handleFeedLookup(request: Request, env: Env): Promise<Response> {

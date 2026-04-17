@@ -9,8 +9,8 @@ declare namespace Cloudflare {
 		AUDIO_BUCKET: R2Bucket;
 		DB: D1Database;
 		PROCESSING_QUEUE: Queue;
-		APP_BASE_URL: "http://localhost:8787";
-		PUBLIC_UI_BASE_URL: "http://localhost:5173";
+		APP_BASE_URL?: string;
+		PUBLIC_UI_BASE_URL?: string;
 		PROCESSING_VERSION: "v1";
 		MAX_EPISODES_PER_FEED_REFRESH: "2";
 		MAX_PROCESSABLE_EPISODES_PER_FEED: "2";

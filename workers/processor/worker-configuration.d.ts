@@ -9,7 +9,7 @@ declare namespace Cloudflare {
 		AUDIO_BUCKET: R2Bucket;
 		DB: D1Database;
 		PROCESSING_QUEUE: Queue;
-		APP_BASE_URL: "http://localhost:8787";
+		APP_BASE_URL?: string;
 		PROCESSING_VERSION: "v1";
 		CLASSIFICATION_PROVIDER: "openrouter";
 		TRANSCRIPTION_GATEWAY_URL: "https://transcriber-production-e6f9.up.railway.app";

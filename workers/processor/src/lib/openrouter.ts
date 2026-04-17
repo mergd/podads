@@ -108,9 +108,15 @@ function extractJsonText(payload: OpenRouterResponse): string {
   return text;
 }
 
-function getAppReferer(env: Env): string | undefined {
-  const appBaseUrl = env.APP_BASE_URL?.trim();
-  return appBaseUrl && /^https?:\/\//.test(appBaseUrl) ? appBaseUrl : undefined;
+const DEFAULT_APP_REFERER = "https://podads.yet-to-be.com";
+
+function getAppReferer(env: Env): string {
+  const override = env.APP_BASE_URL?.trim();
+  if (override && /^https?:\/\//.test(override) && !/localhost|127\.0\.0\.1/.test(override)) {
+    return override;
+  }
+
+  return DEFAULT_APP_REFERER;
 }
 
 export function getOpenRouterMetrics(payload: OpenRouterResponse, requestDurationMs: number): OpenRouterMetrics {
@@ -155,7 +161,7 @@ export async function createOpenRouterChatCompletion(
     headers: {
       Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
       "content-type": "application/json",
-      ...(getAppReferer(env) ? { "HTTP-Referer": getAppReferer(env) } : {}),
+      "HTTP-Referer": getAppReferer(env),
       "X-Title": "PodAds"
     },
     body: JSON.stringify(body)
