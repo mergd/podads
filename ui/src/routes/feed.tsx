@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
 import { BrandCorner } from "../components/BrandCorner";
+import { ExpandableDescription } from "../components/ExpandableDescription";
 import { HtmlContent } from "../components/HtmlContent";
 import { InlineAudioPlayer } from "../components/InlineAudioPlayer";
 import { Skeleton } from "../components/Skeleton";
@@ -132,7 +133,7 @@ export function FeedPage() {
           </div>
           <h1 className={styles.title} style={{ viewTransitionName: `feed-title-${slug}` }}>{decodeEntities(detail.feed.title)}</h1>
           {detail.feed.description ? (
-            <HtmlContent className={styles.description} html={detail.feed.description} />
+            <ExpandableDescription className={styles.description} clampLines={3} html={detail.feed.description} />
           ) : null}
           <div className={styles.stats}>
             <span>{detail.feed.episodeCount} episode{detail.feed.episodeCount !== 1 ? "s" : ""}</span>

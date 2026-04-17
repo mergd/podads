@@ -1,0 +1,31 @@
+.wrap {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.content {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: var(--clamp-lines, 3);
+  -webkit-box-orient: vertical;
+}
+
+.content[data-expanded="true"] {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.toggle {
+  justify-self: start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent);
+  font-size: var(--text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  text-decoration: underline;
+}
