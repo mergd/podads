@@ -13,6 +13,8 @@
   "scripts": {
     "build": "bun run --cwd ui build && bun run --cwd workers/api build && bun run --cwd workers/processor build && bun run --cwd services/transcriber build",
     "dev:ui": "bun run --cwd ui dev",
+    "dev:api": "bun run --cwd workers/api dev",
+    "dev:processor": "bun run --cwd workers/processor dev",
     "lint": "bun run --cwd packages/shared lint && bun run --cwd ui lint && bun run --cwd workers/api lint && bun run --cwd workers/processor lint && bun run --cwd services/transcriber typecheck",
     "typecheck": "bun run --cwd packages/shared typecheck && bun run --cwd ui typecheck && bun run --cwd workers/api typecheck && bun run --cwd workers/processor typecheck && bun run --cwd services/transcriber typecheck",
     "types": "bun run --cwd workers/api types && bun run --cwd workers/processor types"

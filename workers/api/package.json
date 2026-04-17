@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "wrangler deploy --dry-run",
+    "dev": "wrangler dev",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types"
