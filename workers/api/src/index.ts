@@ -684,6 +684,13 @@ export default {
       }
     }
 
+    if (request.method === "GET" || request.method === "HEAD") {
+      const audioRouteEarly = parseAudioRoute(url.pathname);
+      if (audioRouteEarly) {
+        return handleAudio(request, env, audioRouteEarly.slug, audioRouteEarly.episodeId);
+      }
+    }
+
     if (request.method === "GET") {
       const transcriptRoute = parseTranscriptRoute(url.pathname);
       if (transcriptRoute) {
@@ -700,10 +707,6 @@ export default {
         return handleRss(request, env, rssSlug);
       }
 
-      const audioRoute = parseAudioRoute(url.pathname);
-      if (audioRoute) {
-        return handleAudio(request, env, audioRoute.slug, audioRoute.episodeId);
-      }
     }
 
     return notFound();
