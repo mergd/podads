@@ -1,5 +1,6 @@
 import { Button } from "@base-ui/react";
 
+import { BrandCorner } from "./BrandCorner";
 import { HtmlContent } from "./HtmlContent";
 import { decodeEntities } from "../lib/entities";
 import { formatEpisodeDuration, isNewContent, shortDate } from "../lib/dates";
@@ -47,7 +48,10 @@ export function FeedPreviewDialog({
             <div className={styles.detailCol}>
               <div className={styles.detailInner}>
                 {preview.imageUrl ? (
-                  <img alt="" className={styles.art} src={preview.imageUrl} />
+                  <div className={styles.artWrap}>
+                    <img alt="" className={styles.art} src={preview.imageUrl} />
+                    <BrandCorner />
+                  </div>
                 ) : (
                   <div className={styles.artPlaceholder} />
                 )}

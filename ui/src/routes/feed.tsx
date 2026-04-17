@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
+import { BrandCorner } from "../components/BrandCorner";
 import { HtmlContent } from "../components/HtmlContent";
 import { InlineAudioPlayer } from "../components/InlineAudioPlayer";
 import { Skeleton } from "../components/Skeleton";
@@ -115,12 +116,10 @@ export function FeedPage() {
     <div className={styles.page}>
       <section className={styles.hero}>
         {detail.feed.imageUrl ? (
-          <img
-            alt=""
-            className={styles.cover}
-            src={detail.feed.imageUrl}
-            style={{ viewTransitionName: `feed-art-${slug}` }}
-          />
+          <div className={styles.coverWrap} style={{ viewTransitionName: `feed-art-${slug}` }}>
+            <img alt="" className={styles.cover} src={detail.feed.imageUrl} />
+            <BrandCorner />
+          </div>
         ) : (
           <div className={styles.coverFallback} style={{ viewTransitionName: `feed-art-${slug}` }}>
             {decodeEntities(detail.feed.title ?? "P").charAt(0)}
@@ -165,13 +164,13 @@ export function FeedPage() {
 
               return (
                 <article className={styles.episode} key={episode.id}>
+                  {episode.imageUrl ? (
+                    <div className={styles.episodeArtWrap}>
+                      <img alt="" className={styles.episodeArt} loading="lazy" src={episode.imageUrl} />
+                    </div>
+                  ) : null}
                   <div className={styles.episodeContent}>
                     <div className={styles.episodeTitleRow}>
-                      {episode.imageUrl ? (
-                        <div className={styles.episodeArtWrap}>
-                          <img alt="" className={styles.episodeArt} loading="lazy" src={episode.imageUrl} />
-                        </div>
-                      ) : null}
                       <Link className={styles.episodeTitleLink} state={{ title: episode.title, imageUrl: episode.imageUrl ?? detail.feed.imageUrl, feedTitle: detail.feed.title }} to={`/${episode.feedSlug}/episodes/${episode.id}`} viewTransition>
                         <h3
                           className={styles.episodeName}

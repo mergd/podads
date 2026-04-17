@@ -34,12 +34,20 @@
   padding: var(--space-4) 0;
 }
 
-.cover {
+.coverWrap {
+  position: relative;
   width: 7rem;
   height: 7rem;
+  container-type: inline-size;
+}
+
+.cover {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   border-radius: var(--radius-lg);
   background: var(--color-bg-inset);
+  display: block;
 }
 
 .coverFallback {
@@ -138,10 +146,14 @@
 .episode {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: var(--space-3);
+  gap: var(--space-4);
   align-items: start;
-  padding: var(--space-3) 0;
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--color-border);
+}
+
+.episode:has(.episodeArtWrap) {
+  grid-template-columns: auto 1fr auto;
 }
 
 .episode:last-child {
@@ -149,9 +161,9 @@
 }
 
 .episodeArtWrap {
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: var(--radius-sm);
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--color-bg-inset);
   flex-shrink: 0;
@@ -305,7 +317,20 @@
 
   .episode {
     grid-template-columns: 1fr;
-    gap: var(--space-2);
+    gap: var(--space-3);
+  }
+
+  .episode:has(.episodeArtWrap) {
+    grid-template-columns: auto 1fr;
+  }
+
+  .episode:has(.episodeArtWrap) .episodeActions {
+    grid-column: 1 / -1;
+  }
+
+  .episodeArtWrap {
+    width: 4rem;
+    height: 4rem;
   }
 
   .episodeActions {
