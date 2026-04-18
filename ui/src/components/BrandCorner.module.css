@@ -8,18 +8,27 @@
   aspect-ratio: 1;
   max-width: 1.6rem;
   min-width: 0.95rem;
-  background: rgb(15 15 20 / 0.82);
   color: #fff;
   font-family: inherit;
   font-weight: 800;
   font-size: clamp(0.55rem, 10cqi, 0.85rem);
   line-height: 1;
   letter-spacing: -0.02em;
-  backdrop-filter: blur(4px);
   pointer-events: none;
   user-select: none;
+  transition: background 150ms ease;
 }
 
 .badge::after {
   content: "P";
+}
+
+.dark {
+  background: rgb(15 15 20 / 0.82);
+  backdrop-filter: blur(4px);
+}
+
+.blue {
+  background: var(--gradient-button);
+  box-shadow: var(--shadow-button);
 }

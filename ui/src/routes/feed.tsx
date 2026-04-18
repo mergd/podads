@@ -69,7 +69,7 @@ export function FeedPage() {
           {previewImage ? (
             <div className={styles.coverWrap} style={{ viewTransitionName: `feed-art-${slug}` }}>
               <img alt="" className={styles.cover} src={previewImage} />
-              <BrandCorner />
+              <BrandCorner src={previewImage} />
             </div>
           ) : (
             <Skeleton variant="rounded" width="7rem" height="7rem" style={{ viewTransitionName: `feed-art-${slug}` }} />
@@ -117,7 +117,7 @@ export function FeedPage() {
         {detail.feed.imageUrl ? (
           <div className={styles.coverWrap} style={{ viewTransitionName: `feed-art-${slug}` }}>
             <img alt="" className={styles.cover} src={detail.feed.imageUrl} />
-            <BrandCorner />
+            <BrandCorner src={detail.feed.imageUrl} />
           </div>
         ) : (
           <div className={styles.coverFallback} style={{ viewTransitionName: `feed-art-${slug}` }}>

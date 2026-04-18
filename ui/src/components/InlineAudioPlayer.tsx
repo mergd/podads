@@ -129,6 +129,12 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
   const isActive = state !== "idle";
   const rootClassName = className ? `${styles.root} ${className}` : styles.root;
 
+  const audioElement = (
+    <audio ref={audioRef} preload="none">
+      <source src={src} type={type ?? undefined} />
+    </audio>
+  );
+
   if (!isActive) {
     return (
       <div className={rootClassName}>
@@ -136,9 +142,7 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
           <Play weight="fill" size={16} />
           {buttonText ? <span>{buttonText}</span> : null}
         </button>
-        <audio ref={audioRef} preload="none">
-          <source src={src} type={type ?? undefined} />
-        </audio>
+        {audioElement}
       </div>
     );
   }
@@ -216,9 +220,7 @@ export function InlineAudioPlayer({ buttonText, className, label, src, type }: I
         </button>
       </div>
 
-      <audio ref={audioRef} preload="none">
-        <source src={src} type={type ?? undefined} />
-      </audio>
+      {audioElement}
     </div>
   );
 }

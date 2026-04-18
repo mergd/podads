@@ -50,7 +50,7 @@ export function FeedPreviewDialog({
                 {preview.imageUrl ? (
                   <div className={styles.artWrap}>
                     <img alt="" className={styles.art} src={preview.imageUrl} />
-                    <BrandCorner />
+                    <BrandCorner src={preview.imageUrl} />
                   </div>
                 ) : (
                   <div className={styles.artPlaceholder} />
