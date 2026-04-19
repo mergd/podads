@@ -2,10 +2,9 @@
   "name": "podads-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-16",
+  "workers_dev": false,
   "routes": [
-    { "pattern": "podads.yet-to-be.com/feeds/*", "zone_name": "yet-to-be.com" },
-    { "pattern": "podads.yet-to-be.com/api/*", "zone_name": "yet-to-be.com" },
-    { "pattern": "podads.yet-to-be.com/audio/*", "zone_name": "yet-to-be.com" }
+    { "pattern": "api.podads.yet-to-be.com", "custom_domain": true }
   ],
   "d1_databases": [
     {

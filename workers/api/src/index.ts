@@ -84,7 +84,7 @@ function badRequest(message: string): Response {
   return json({ error: message }, 400);
 }
 
-const DEFAULT_APP_BASE_URL = "https://podads.yet-to-be.com";
+const DEFAULT_APP_BASE_URL = "https://api.podads.yet-to-be.com";
 const DEFAULT_UI_BASE_URL = "https://podads.yet-to-be.com";
 
 function getBaseUrl(request: Request, env: Env): string {
