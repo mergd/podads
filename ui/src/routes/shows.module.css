@@ -69,10 +69,36 @@
   display: grid;
   gap: var(--space-2);
   transition: opacity 80ms ease;
+  position: relative;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .card:hover {
   opacity: 0.8;
+}
+
+.card:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.importBadge {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-accent-strong);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .artWrap {

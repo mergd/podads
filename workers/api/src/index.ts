@@ -3,6 +3,8 @@ import type {
   EpisodeTranscriptResponse,
   FeedLookupResponse,
   FeedPreviewResponse,
+  PodcastSearchItem,
+  PodcastSearchResponse,
   RegisterFeedRequest
 } from "@podads/shared/api";
 import type { EpisodeQueueMessage } from "@podads/shared/queue";
@@ -18,12 +20,15 @@ import {
   getFeedBySourceUrl,
   getFeedBySlug,
   getFeedDetail,
+  getFeedsByNormalizedUrls,
   getHomeData,
   listFeeds,
   registerFeed,
   resetEpisodeToPending,
   selectGlobalPendingEpisodesForProcessing
 } from "./lib/feedRegistry";
+import { searchItunesPodcasts } from "./lib/itunesSearch";
+import { normalizeFeedUrl } from "./lib/normalizeFeedUrl";
 import { capturePostHogEvent } from "./lib/posthog";
 import { buildProxiedRssXml } from "./lib/rss";
 
@@ -243,6 +248,46 @@ async function handleListFeeds(request: Request, env: Env): Promise<Response> {
   const query = url.searchParams.get("q")?.trim() || undefined;
   const result = await listFeeds(env.DB, query);
   return json(result);
+}
+
+async function handlePodcastSearch(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("q")?.trim() ?? "";
+  const rawLimit = url.searchParams.get("limit");
+  const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+  const country = url.searchParams.get("country") ?? undefined;
+
+  if (!query) {
+    const empty: PodcastSearchResponse = { query: "", results: [] };
+    return json(empty);
+  }
+
+  try {
+    const itunesResults = await searchItunesPodcasts(query, { limit, country });
+    const normalizedKeys = itunesResults.map((item) => {
+      try {
+        return normalizeFeedUrl(item.feedUrl);
+      } catch {
+        return "";
+      }
+    });
+    const feedsByNormalized = await getFeedsByNormalizedUrls(env.DB, normalizedKeys);
+
+    const results: PodcastSearchItem[] = itunesResults.map((itunes, index) => {
+      const key = normalizedKeys[index] ?? "";
+      const match = key ? feedsByNormalized.get(key) ?? null : null;
+      return {
+        itunes,
+        feed: match ? formatRegisterResponse(match, false, getBaseUrl(request, env)).feed : null
+      };
+    });
+
+    const response: PodcastSearchResponse = { query, results };
+    return json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown podcast search failure";
+    return json({ error: message }, 502);
+  }
 }
 
 async function handleReport(request: Request, env: Env): Promise<Response> {
@@ -728,6 +773,10 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/feeds/lookup") {
       return handleFeedLookup(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/search/podcasts") {
+      return handlePodcastSearch(request, env);
     }
 
     if (request.method === "GET" && url.pathname === "/api/admin/status") {

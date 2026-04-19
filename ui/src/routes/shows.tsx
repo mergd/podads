@@ -1,13 +1,35 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { Skeleton } from "../components/Skeleton";
-import { useShowsSearch } from "../contexts/showsSearch";
+import { useShowsSearch, type ShowSearchItem } from "../contexts/showsSearch";
 import { lastUpdatedLabel } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import styles from "./shows.module.css";
 
+function itemTitle(item: ShowSearchItem): string {
+  return item.feed?.title ?? item.itunes?.title ?? "Untitled podcast";
+}
+
+function itemAuthor(item: ShowSearchItem): string | null {
+  return item.feed?.author ?? item.itunes?.author ?? null;
+}
+
+function itemImage(item: ShowSearchItem): string | null {
+  return item.feed?.imageUrl ?? item.itunes?.artworkUrl ?? null;
+}
+
 export function ShowsPage() {
-  const { feeds, total, hasLoaded, query } = useShowsSearch();
+  const { items, total, hasLoaded, query, importItem, importingKey } = useShowsSearch();
+  const navigate = useNavigate();
+
+  const handleImport = async (item: ShowSearchItem) => {
+    try {
+      const feed = await importItem(item);
+      navigate(`/${feed.slug}`, { state: { title: feed.title, imageUrl: feed.imageUrl } });
+    } catch {
+      // keep the user on the page; context preserves state
+    }
+  };
 
   return (
     <div className={styles.page}>
@@ -30,55 +52,93 @@ export function ShowsPage() {
             </div>
           ))}
         </div>
-      ) : feeds.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className={styles.empty}>
           {query ? (
-            <>
-              <p className={styles.emptyTitle}>No shows matching &ldquo;{query}&rdquo;</p>
-              <p className={styles.emptyHint}>
-                Find it on{" "}
-                <a
-                  className={styles.emptyLink}
-                  href={`https://podcastaddict.com/?q=${encodeURIComponent(query)}`}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Podcast Addict
-                </a>
-                , grab the RSS link, then add it from the home page.
-              </p>
-            </>
+            <p className={styles.emptyTitle}>No shows matching &ldquo;{query}&rdquo; on Apple Podcasts</p>
           ) : (
             "No shows registered yet. Register a feed from the home page."
           )}
         </div>
       ) : (
         <div className={styles.grid}>
-          {feeds.map((feed) => (
-            <Link className={styles.card} key={feed.slug} state={{ title: feed.title, imageUrl: feed.imageUrl }} to={`/${feed.slug}`} viewTransition>
-              <div className={styles.artWrap} style={{ viewTransitionName: `feed-art-${feed.slug}` }}>
-                {feed.imageUrl ? (
-                  <img alt="" className={styles.art} loading="lazy" src={feed.imageUrl} />
+          {items.map((item) => {
+            const title = decodeEntities(itemTitle(item));
+            const author = itemAuthor(item);
+            const image = itemImage(item);
+            const fallbackLetter = title.charAt(0);
+
+            const art = (
+              <div
+                className={styles.artWrap}
+                style={item.feed ? { viewTransitionName: `feed-art-${item.feed.slug}` } : undefined}
+              >
+                {image ? (
+                  <img alt="" className={styles.art} loading="lazy" src={image} />
                 ) : (
-                  <div className={styles.artFallback}>
-                    {decodeEntities(feed.title ?? "P").charAt(0)}
-                  </div>
+                  <div className={styles.artFallback}>{fallbackLetter}</div>
                 )}
               </div>
+            );
+
+            const info = (
               <div className={styles.info}>
-                <h3 className={styles.name} style={{ viewTransitionName: `feed-title-${feed.slug}` }}>{decodeEntities(feed.title)}</h3>
-                {feed.author ? (
-                  <div className={styles.author}>{feed.author}</div>
-                ) : null}
+                <h3
+                  className={styles.name}
+                  style={item.feed ? { viewTransitionName: `feed-title-${item.feed.slug}` } : undefined}
+                >
+                  {title}
+                </h3>
+                {author ? <div className={styles.author}>{author}</div> : null}
                 <div className={styles.meta}>
-                  <span>{feed.episodeCount} ep{feed.episodeCount !== 1 ? "s" : ""}</span>
-                  {feed.latestEpisodePubDate ? (
-                    <span>{lastUpdatedLabel(feed.latestEpisodePubDate)}</span>
+                  {item.feed ? (
+                    <>
+                      <span>
+                        {item.feed.episodeCount} ep{item.feed.episodeCount !== 1 ? "s" : ""}
+                      </span>
+                      {item.feed.latestEpisodePubDate ? (
+                        <span>{lastUpdatedLabel(item.feed.latestEpisodePubDate)}</span>
+                      ) : null}
+                    </>
+                  ) : item.itunes?.trackCount ? (
+                    <span>
+                      {item.itunes.trackCount} ep{item.itunes.trackCount !== 1 ? "s" : ""}
+                    </span>
                   ) : null}
                 </div>
               </div>
-            </Link>
-          ))}
+            );
+
+            if (item.feed) {
+              return (
+                <Link
+                  className={styles.card}
+                  key={item.key}
+                  state={{ title: item.feed.title, imageUrl: item.feed.imageUrl }}
+                  to={`/${item.feed.slug}`}
+                  viewTransition
+                >
+                  {art}
+                  {info}
+                </Link>
+              );
+            }
+
+            const isImporting = importingKey === item.key;
+            return (
+              <button
+                className={styles.card}
+                disabled={isImporting}
+                key={item.key}
+                onClick={() => void handleImport(item)}
+                type="button"
+              >
+                {art}
+                {info}
+                <span className={styles.importBadge}>{isImporting ? "Importing…" : "Import"}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

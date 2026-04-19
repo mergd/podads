@@ -6,6 +6,7 @@ import type {
   FeedPreviewResponse,
   FeedsListResponse,
   HomeResponse,
+  PodcastSearchResponse,
   RegisterFeedResponse
 } from "@podads/shared/api";
 
@@ -31,6 +32,12 @@ export async function fetchFeeds(query?: string): Promise<FeedsListResponse> {
   const params = query ? `?q=${encodeURIComponent(query)}` : "";
   const response = await fetch(`${API_BASE_URL}/api/feeds${params}`);
   return parseJson<FeedsListResponse>(response);
+}
+
+export async function searchPodcasts(query: string): Promise<PodcastSearchResponse> {
+  const params = `?q=${encodeURIComponent(query)}`;
+  const response = await fetch(`${API_BASE_URL}/api/search/podcasts${params}`);
+  return parseJson<PodcastSearchResponse>(response);
 }
 
 export async function fetchFeed(slug: string): Promise<FeedDetailResponse> {

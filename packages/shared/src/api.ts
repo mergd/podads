@@ -136,6 +136,29 @@ export interface FeedsListResponse {
   total: number;
 }
 
+export interface ItunesPodcastResult {
+  collectionId: number;
+  title: string;
+  author: string | null;
+  feedUrl: string;
+  collectionViewUrl: string | null;
+  artworkUrl: string | null;
+  genres: string[];
+  trackCount: number | null;
+  country: string | null;
+  releaseDate: string | null;
+}
+
+export interface PodcastSearchItem {
+  itunes: ItunesPodcastResult;
+  feed: FeedSummary | null;
+}
+
+export interface PodcastSearchResponse {
+  query: string;
+  results: PodcastSearchItem[];
+}
+
 export interface ComplaintRequest {
   feedSlug?: string;
   episodeId?: number;

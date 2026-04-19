@@ -397,6 +397,26 @@ export async function getFeedBySourceUrl(db: D1Database, sourceUrl: string): Pro
   return getFeedByNormalizedUrl(db, normalizeFeedUrl(sourceUrl));
 }
 
+export async function getFeedsByNormalizedUrls(
+  db: D1Database,
+  normalizedUrls: string[]
+): Promise<Map<string, FeedRow>> {
+  const matches = new Map<string, FeedRow>();
+  const unique = Array.from(new Set(normalizedUrls.filter((url) => url.length > 0)));
+  if (unique.length === 0) return matches;
+
+  const placeholders = unique.map((_, index) => `?${index + 1}`).join(",");
+  const result = await db
+    .prepare(`SELECT * FROM feeds WHERE normalized_url IN (${placeholders})`)
+    .bind(...unique)
+    .all<FeedRow>();
+
+  for (const row of result.results ?? []) {
+    matches.set(row.normalized_url, row);
+  }
+  return matches;
+}
+
 async function insertFeed(db: D1Database, sourceUrl: string, normalizedUrl: string): Promise<FeedRow> {
   const hash = await hashNormalizedUrl(normalizedUrl);
   const slug = slugFromHash(hash);
