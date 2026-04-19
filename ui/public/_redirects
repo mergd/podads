@@ -1,2 +1,5 @@
-/    /index.html   200
-/*   /index.html   200
+/api/*     /api/:splat     200
+/feeds/*   /feeds/:splat   200
+/audio/*   /audio/:splat   200
+/          /index.html     200
+/*         /index.html     200
