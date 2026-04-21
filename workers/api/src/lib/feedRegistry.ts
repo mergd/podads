@@ -476,9 +476,6 @@ export async function updateFeedFromSource(db: D1Database, feedId: number, sourc
         language = ?7,
         categories_json = ?8,
         metadata_json = ?9,
-        status = 'ready',
-        last_refreshed_at = ?10,
-        last_error = NULL,
         updated_at = ?10
       WHERE id = ?1`
     )
@@ -494,6 +491,21 @@ export async function updateFeedFromSource(db: D1Database, feedId: number, sourc
       JSON.stringify(source.metadata),
       new Date().toISOString()
     )
+    .run();
+}
+
+export async function markFeedRefreshComplete(db: D1Database, feedId: number): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE feeds
+      SET status = 'ready',
+          last_refreshed_at = ?2,
+          last_error = NULL,
+          updated_at = ?2
+      WHERE id = ?1`
+    )
+    .bind(feedId, now)
     .run();
 }
 
@@ -925,7 +937,17 @@ export async function getFeedDetail(db: D1Database, slug: string, baseUrl: strin
 }
 
 export async function listFeedsForRefresh(db: D1Database): Promise<FeedRow[]> {
-  const feeds = await db.prepare("SELECT * FROM feeds ORDER BY created_at ASC").all<FeedRow>();
+  // Stalest feeds first (never-refreshed rank first), so a timing out cron run
+  // doesn't keep starving the same tail of the list every invocation.
+  const feeds = await db
+    .prepare(
+      `SELECT * FROM feeds
+      ORDER BY
+        CASE WHEN last_refreshed_at IS NULL THEN 0 ELSE 1 END,
+        last_refreshed_at ASC,
+        created_at ASC`
+    )
+    .all<FeedRow>();
   return feeds.results;
 }
 

@@ -4,6 +4,7 @@ import { generateBrandedArtwork } from "./artwork";
 import {
   enqueueEpisodeJobs,
   markExcessEpisodesSkipped,
+  markFeedRefreshComplete,
   markFeedRefreshFailure,
   selectEpisodesForProcessing,
   updateFeedBrandedArtwork,
@@ -93,6 +94,11 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
   if (messages.length > 0) {
     await enqueueEpisodeJobs(env.DB, env.PROCESSING_QUEUE, messages);
   }
+
+  // Only advance last_refreshed_at after everything succeeds, so a partial run
+  // (e.g. scheduled event hitting the CPU budget mid-refresh) is retried next
+  // tick instead of being silently marked as "refreshed".
+  await markFeedRefreshComplete(env.DB, feed.id);
 
   await capturePostHogEvent(env, {
     distinctId: `feed:${feed.slug}`,
