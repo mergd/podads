@@ -3,6 +3,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-04-16",
   "workers_dev": false,
+  "rules": [
+    { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
+  ],
   "routes": [
     { "pattern": "api.podads.yet-to-be.com", "custom_domain": true }
   ],

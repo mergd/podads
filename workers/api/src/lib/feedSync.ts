@@ -1,16 +1,47 @@
 import type { EpisodeQueueMessage } from "@podads/shared/queue";
 
+import { generateBrandedArtwork } from "./artwork";
 import {
   enqueueEpisodeJobs,
   markExcessEpisodesSkipped,
   markFeedRefreshFailure,
   selectEpisodesForProcessing,
+  updateFeedBrandedArtwork,
   updateFeedFromSource,
   upsertEpisodes
 } from "./feedRegistry";
 import { capturePostHogEvent } from "./posthog";
 import { parseSourceFeed } from "./rss";
 import type { FeedRow, SourceFeed } from "./types";
+
+function brandedArtworkKey(slug: string): string {
+  return `feed-artwork/${slug}.png`;
+}
+
+async function syncBrandedArtwork(env: Env, feed: FeedRow, source: SourceFeed): Promise<void> {
+  if (!source.imageUrl) {
+    return;
+  }
+
+  const alreadyBrandedForThisSource =
+    feed.branded_image_key !== null && feed.branded_image_source_url === source.imageUrl;
+  if (alreadyBrandedForThisSource) {
+    return;
+  }
+
+  try {
+    const { bytes, contentType } = await generateBrandedArtwork(source.imageUrl);
+    const key = brandedArtworkKey(feed.slug);
+    await env.AUDIO_BUCKET.put(key, bytes, {
+      httpMetadata: { contentType, cacheControl: "public, max-age=86400" }
+    });
+    await updateFeedBrandedArtwork(env.DB, feed.id, key, source.imageUrl);
+  } catch (error) {
+    // Branding is a nice-to-have overlay; never let it fail the refresh.
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[artwork] failed to generate branded artwork for ${feed.slug}: ${message}`);
+  }
+}
 
 function getMaxEpisodesOnInitialRefresh(env: Env): number {
   const parsed = Number.parseInt(env.MAX_EPISODES_PER_FEED_REFRESH, 10);
@@ -37,6 +68,7 @@ export async function refreshFeed(env: Env, feed: FeedRow): Promise<number> {
   const source = await fetchSourceFeed(feed.source_url);
   await updateFeedFromSource(env.DB, feed.id, source);
   await upsertEpisodes(env.DB, feed.id, source, env.PROCESSING_VERSION);
+  await syncBrandedArtwork(env, feed, source);
   if (isInitialRefresh) {
     await markExcessEpisodesSkipped(env.DB, feed.id, getMaxProcessableEpisodesOnInitialRefresh(env));
   }

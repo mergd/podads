@@ -274,7 +274,14 @@ function attachFeedEpisodeStats(rows: FeedRow[], episodeStats: EpisodeDateStatRo
   });
 }
 
-function buildFeedSummary(row: FeedRowWithStats): FeedSummary {
+export function brandedImageUrlForFeed(
+  row: Pick<FeedRow, "slug" | "branded_image_key">,
+  baseUrl: string
+): string | null {
+  return row.branded_image_key ? `${baseUrl}/feed-artwork/${row.slug}.png` : null;
+}
+
+function buildFeedSummary(row: FeedRowWithStats, baseUrl: string): FeedSummary {
   return {
     id: row.id,
     slug: row.slug,
@@ -283,6 +290,7 @@ function buildFeedSummary(row: FeedRowWithStats): FeedSummary {
     description: row.description,
     siteLink: row.site_link,
     imageUrl: row.image_url,
+    brandedImageUrl: brandedImageUrlForFeed(row, baseUrl),
     author: row.author,
     language: row.language,
     categories: parseJsonArray(row.categories_json),
@@ -487,6 +495,34 @@ export async function updateFeedFromSource(db: D1Database, feedId: number, sourc
       new Date().toISOString()
     )
     .run();
+}
+
+export async function updateFeedBrandedArtwork(
+  db: D1Database,
+  feedId: number,
+  key: string,
+  sourceImageUrl: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE feeds
+      SET branded_image_key = ?2,
+          branded_image_source_url = ?3,
+          branded_image_updated_at = ?4,
+          updated_at = ?4
+      WHERE id = ?1`
+    )
+    .bind(feedId, key, sourceImageUrl, now)
+    .run();
+}
+
+export async function getFeedBrandedArtworkKey(db: D1Database, slug: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT branded_image_key FROM feeds WHERE slug = ?1 LIMIT 1")
+    .bind(slug)
+    .first<{ branded_image_key: string | null }>();
+  return row?.branded_image_key ?? null;
 }
 
 export async function markFeedRefreshFailure(db: D1Database, feedId: number, errorMessage: string): Promise<void> {
@@ -790,11 +826,11 @@ export async function getHomeData(db: D1Database, baseUrl: string, uiBaseUrl: st
 
   return {
     latestEpisodes: latestEpisodes.results.map((row) => buildEpisodeSummary(row, baseUrl, uiBaseUrl)),
-    feeds: feeds.results.map(buildFeedSummary)
+    feeds: feeds.results.map((row) => buildFeedSummary(row, baseUrl))
   };
 }
 
-export async function listFeeds(db: D1Database, query?: string): Promise<FeedsListResponse> {
+export async function listFeeds(db: D1Database, baseUrl: string, query?: string): Promise<FeedsListResponse> {
   if (query && query.length > 0) {
     const pattern = `%${query}%`;
     const feeds = await db
@@ -824,7 +860,7 @@ export async function listFeeds(db: D1Database, query?: string): Promise<FeedsLi
       .first<{ count: number | string }>();
 
     return {
-      feeds: sortFeedRows(feedsWithStats).slice(0, 100).map(buildFeedSummary),
+      feeds: sortFeedRows(feedsWithStats).slice(0, 100).map((row) => buildFeedSummary(row, baseUrl)),
       total: Number(total?.count ?? feeds.results.length)
     };
   }
@@ -850,7 +886,7 @@ export async function listFeeds(db: D1Database, query?: string): Promise<FeedsLi
     .first<{ count: number | string }>();
 
   return {
-    feeds: sortFeedRows(feedsWithStats).slice(0, 100).map(buildFeedSummary),
+    feeds: sortFeedRows(feedsWithStats).slice(0, 100).map((row) => buildFeedSummary(row, baseUrl)),
     total: Number(total?.count ?? feeds.results.length)
   };
 }
@@ -880,7 +916,7 @@ export async function getFeedDetail(db: D1Database, slug: string, baseUrl: strin
   };
 
   return {
-    feed: buildFeedSummary(feedWithStats),
+    feed: buildFeedSummary(feedWithStats, baseUrl),
     episodes: sortedEpisodes
       .slice(0, 50)
       .map((row) => buildEpisodeSummary(row, baseUrl, uiBaseUrl)),
@@ -1004,6 +1040,6 @@ export function formatRegisterResponse(feed: FeedRow, created: boolean, baseUrl:
   return {
     created,
     proxiedFeedUrl: `${baseUrl}/feeds/${feed.slug}.xml`,
-    feed: buildFeedSummary(feed)
+    feed: buildFeedSummary(feed, baseUrl)
   };
 }

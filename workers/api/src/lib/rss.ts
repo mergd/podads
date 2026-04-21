@@ -188,8 +188,16 @@ export function parseSourceFeed(xml: string): SourceFeed {
 }
 
 export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[], proxiedFeedUrl: string): string {
-  const imageTag = feed.imageUrl
-    ? `<image>${renderOptionalTag("url", feed.imageUrl)}${renderOptionalTag("title", feed.title)}${renderOptionalTag("link", feed.siteLink)}</image>`
+  // Prefer the podads-branded artwork (source image + P corner badge) so Apple Podcasts
+  // and other clients surface our logo in their UI, falling back to the raw source image.
+  const channelImageUrl = feed.brandedImageUrl ?? feed.imageUrl;
+  // Brand the proxied feed title so it's obvious in podcast clients that this is the podads-cleaned version.
+  const brandedTitle = feed.title ? `${feed.title} (Podads)` : feed.title;
+  const imageTag = channelImageUrl
+    ? `<image>${renderOptionalTag("url", channelImageUrl)}${renderOptionalTag("title", brandedTitle)}${renderOptionalTag("link", feed.siteLink)}</image>`
+    : "";
+  const itunesChannelImage = channelImageUrl
+    ? `<itunes:image href="${escapeXml(channelImageUrl)}" />`
     : "";
   const categories = feed.categories.map((category) => renderOptionalTag("category", category)).join("");
   const items = episodes
@@ -213,13 +221,14 @@ export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[]
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podads="https://podads.app/ns/1.0">
   <channel>
     <atom:link href="${escapeXml(proxiedFeedUrl)}" rel="self" type="application/rss+xml" />
-    ${renderOptionalTag("title", feed.title)}
+    ${renderOptionalTag("title", brandedTitle)}
     ${renderOptionalTag("description", feed.description)}
     ${renderOptionalTag("link", feed.siteLink)}
     ${renderOptionalTag("language", feed.language)}
     ${renderOptionalTag("itunes:author", feed.author)}
     ${categories}
     ${imageTag}
+    ${itunesChannelImage}
     ${renderOptionalTag("podads:source", feed.sourceUrl)}
     ${items}
   </channel>

@@ -43,6 +43,9 @@ export interface FeedRow {
   categories_json: string;
   metadata_json: string;
   has_ads: number | null;
+  branded_image_key: string | null;
+  branded_image_source_url: string | null;
+  branded_image_updated_at: string | null;
   status: FeedStatus;
   last_refreshed_at: string | null;
   last_error: string | null;

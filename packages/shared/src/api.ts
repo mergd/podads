@@ -43,6 +43,12 @@ export interface FeedSummary {
   description: string | null;
   siteLink: string | null;
   imageUrl: string | null;
+  /**
+   * Podads-branded artwork URL (source artwork with the P corner badge baked in).
+   * Used as the `<itunes:image>` for proxied feeds so podcast clients surface our logo.
+   * Falls back to `imageUrl` when branding hasn't been generated yet.
+   */
+  brandedImageUrl: string | null;
   author: string | null;
   language: string | null;
   categories: string[];

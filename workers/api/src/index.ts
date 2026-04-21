@@ -17,6 +17,7 @@ import {
   getEpisodeAudioSource,
   getEpisodeById,
   getEpisodeTranscriptMetadata,
+  getFeedBrandedArtworkKey,
   getFeedBySourceUrl,
   getFeedBySlug,
   getFeedDetail,
@@ -246,7 +247,7 @@ async function handleHome(request: Request, env: Env): Promise<Response> {
 async function handleListFeeds(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const query = url.searchParams.get("q")?.trim() || undefined;
-  const result = await listFeeds(env.DB, query);
+  const result = await listFeeds(env.DB, getBaseUrl(request, env), query);
   return json(result);
 }
 
@@ -742,6 +743,38 @@ function parseRssSlug(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
+function parseFeedArtworkSlug(pathname: string): string | null {
+  const match = pathname.match(/^\/feed-artwork\/([^/]+)\.png$/);
+  return match?.[1] ?? null;
+}
+
+async function handleFeedArtwork(request: Request, env: Env, slug: string): Promise<Response> {
+  const key = await getFeedBrandedArtworkKey(env.DB, slug);
+  if (!key) {
+    return notFound();
+  }
+
+  const isHead = request.method === "HEAD";
+  const object = isHead ? await env.AUDIO_BUCKET.head(key) : await env.AUDIO_BUCKET.get(key);
+  if (!object) {
+    return notFound();
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("content-type", headers.get("content-type") ?? "image/png");
+  headers.set("cache-control", "public, max-age=86400");
+  if (object.etag) {
+    headers.set("etag", `"${object.etag}"`);
+  }
+
+  if (isHead) {
+    return withCors(new Response(null, { status: 200, headers }));
+  }
+
+  return withCors(new Response((object as R2ObjectBody).body, { status: 200, headers }));
+}
+
 function parseAudioRoute(pathname: string): { slug: string; episodeId: number } | null {
   const match = pathname.match(/^\/audio\/([^/]+)\/(\d+)\.mp3$/);
 
@@ -810,6 +843,11 @@ export default {
       const audioRouteEarly = parseAudioRoute(url.pathname);
       if (audioRouteEarly) {
         return handleAudio(request, env, audioRouteEarly.slug, audioRouteEarly.episodeId);
+      }
+
+      const artworkSlug = parseFeedArtworkSlug(url.pathname);
+      if (artworkSlug) {
+        return handleFeedArtwork(request, env, artworkSlug);
       }
     }
 
