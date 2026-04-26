@@ -116,7 +116,10 @@ function buildEpisodeProcessingDiagnostics(details: Record<string, unknown>): Ep
     openingAdSpanCount: parseNumber(details.openingAdSpanCount),
     adDetectionReasons: parseStringArray(details.adDetectionReasons),
     audioRewriteMode: normalizeAudioRewriteMode(details.audioRewriteMode),
+    sourceDurationMs: parseNumber(details.sourceDurationMs),
+    cleanedDurationMs: parseNumber(details.cleanedDurationMs),
     removedDurationMs: parseNumber(details.removedDurationMs),
+    bytesWritten: parseNumber(details.bytesWritten),
     rewriteNotes: parseStringArray(details.rewriteNotes)
   };
 
@@ -131,7 +134,10 @@ function buildEpisodeProcessingDiagnostics(details: Record<string, unknown>): Ep
     diagnostics.openingAdSpanCount !== null ||
     diagnostics.adDetectionReasons.length > 0 ||
     diagnostics.audioRewriteMode !== null ||
+    diagnostics.sourceDurationMs !== null ||
+    diagnostics.cleanedDurationMs !== null ||
     diagnostics.removedDurationMs !== null ||
+    diagnostics.bytesWritten !== null ||
     diagnostics.rewriteNotes.length > 0;
 
   return hasSignal ? diagnostics : null;
@@ -154,6 +160,14 @@ function parseDateMs(value: string | null | undefined): number | null {
 
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDurationMsForFeed(durationMs: number | null): string | null {
+  if (durationMs === null || durationMs <= 0) {
+    return null;
+  }
+
+  return String(Math.max(1, Math.round(durationMs / 1000)));
 }
 
 /** SQL expression: newest-first using stored ms, else episode row creation time. */
@@ -307,6 +321,10 @@ function buildEpisodeSummary(
   uiBaseUrl: string
 ): EpisodeSummary {
   const processingDetails = parseJsonObject(row.processing_details_json);
+  const processingDiagnostics = buildEpisodeProcessingDiagnostics(processingDetails);
+  const cleanedDuration = row.cleaned_enclosure_key
+    ? formatDurationMsForFeed(processingDiagnostics?.cleanedDurationMs ?? null)
+    : null;
 
   return {
     id: row.id,
@@ -319,7 +337,7 @@ function buildEpisodeSummary(
     episodeLink: row.episode_link,
     author: row.author,
     pubDate: row.pub_date,
-    duration: row.duration,
+    duration: cleanedDuration ?? row.duration,
     imageUrl: row.image_url,
     sourceEnclosureUrl: row.source_enclosure_url,
     sourceEnclosureType: row.source_enclosure_type,
@@ -327,7 +345,7 @@ function buildEpisodeSummary(
     cleanedEnclosureUrl: row.cleaned_enclosure_key ? `${baseUrl}/audio/${row.feed_slug}/${row.id}.mp3` : null,
     processingStatus: row.processing_status,
     processingSubstatus: normalizeProcessingSubstatus(processingDetails.processingSubstatus),
-    processingDiagnostics: buildEpisodeProcessingDiagnostics(processingDetails),
+    processingDiagnostics,
     lastError: row.last_error,
     reportUrl: `${uiBaseUrl}/report?feed=${encodeURIComponent(row.feed_slug)}&episode=${row.id}`
   };

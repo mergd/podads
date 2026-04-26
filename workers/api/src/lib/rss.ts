@@ -204,8 +204,16 @@ export function buildProxiedRssXml(feed: FeedSummary, episodes: EpisodeSummary[]
     .map((episode) => {
       const enclosureUrl = episode.cleanedEnclosureUrl ?? episode.sourceEnclosureUrl;
       const enclosureType = episode.sourceEnclosureType ?? "audio/mpeg";
-      const enclosureLength = episode.sourceEnclosureLength
-        ? ` length="${escapeXml(episode.sourceEnclosureLength)}"`
+      const cleanedEnclosureLength = episode.cleanedEnclosureUrl
+        ? episode.processingDiagnostics?.bytesWritten ?? null
+        : null;
+      const enclosureLengthValue = cleanedEnclosureLength !== null && cleanedEnclosureLength > 0
+        ? String(Math.round(cleanedEnclosureLength))
+        : episode.cleanedEnclosureUrl
+          ? null
+          : episode.sourceEnclosureLength;
+      const enclosureLength = enclosureLengthValue
+        ? ` length="${escapeXml(enclosureLengthValue)}"`
         : "";
       const itemLink = episode.episodeLink ?? enclosureUrl;
       const guid = episode.guid ?? episode.sourceEnclosureUrl ?? String(episode.id);

@@ -322,7 +322,10 @@ async function handleRss(request: Request, env: Env, slug: string): Promise<Resp
     return notFound();
   }
 
-  const rss = buildProxiedRssXml(detail.feed, detail.episodes, detail.proxiedFeedUrl);
+  const publishableEpisodes = detail.episodes.filter((episode) =>
+    episode.processingStatus === "ready" || episode.processingStatus === "skipped"
+  );
+  const rss = buildProxiedRssXml(detail.feed, publishableEpisodes, detail.proxiedFeedUrl);
   return text(rss, 200, "application/rss+xml; charset=utf-8");
 }
 
