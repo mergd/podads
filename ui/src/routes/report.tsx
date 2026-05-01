@@ -30,12 +30,14 @@ export function ReportPage() {
   );
 
   useEffect(() => {
-    if (!context.feedSlug) return;
+    const feedSlug = context.feedSlug;
+    if (!feedSlug) return;
+
     let active = true;
 
     async function load() {
       try {
-        const next = await fetchFeed(context.feedSlug!);
+        const next = await fetchFeed(feedSlug);
         if (active) setDetail(next);
       } catch {
         // feed context is optional, don't block the form
@@ -145,18 +147,18 @@ export function ReportPage() {
           <Input className={styles.input} placeholder="you@example.com" type="email" />
         </Field.Root>
 
-        <label className={styles.field}>
-          <span className={styles.label}>Issue type</span>
+        <Field.Root className={styles.field} name="issueType">
+          <Field.Label className={styles.label}>Issue type</Field.Label>
           <select className={styles.select} defaultValue="bad_cut" name="issueType">
             <option value="bad_cut">Bad cut</option>
             <option value="missed_ad">Missed ad</option>
             <option value="metadata_issue">Metadata issue</option>
             <option value="other">Other</option>
           </select>
-        </label>
+        </Field.Root>
 
-        <label className={styles.field}>
-          <span className={styles.label}>What happened?</span>
+        <Field.Root className={styles.field} name="message">
+          <Field.Label className={styles.label}>What happened?</Field.Label>
           <textarea
             className={styles.textarea}
             name="message"
@@ -164,7 +166,7 @@ export function ReportPage() {
             required
             rows={5}
           />
-        </label>
+        </Field.Root>
 
         <Button className={styles.button} type="submit">
           Send report
