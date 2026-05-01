@@ -35,16 +35,16 @@ export function ReportPage() {
 
     let active = true;
 
-    async function load() {
+    async function load(slug: string) {
       try {
-        const next = await fetchFeed(feedSlug);
+        const next = await fetchFeed(slug);
         if (active) setDetail(next);
       } catch {
         // feed context is optional, don't block the form
       }
     }
 
-    void load();
+    void load(feedSlug);
     return () => { active = false; };
   }, [context.feedSlug]);
 
