@@ -41,6 +41,18 @@ export interface ParsedMp3 {
   hasXingTag: boolean;
 }
 
+interface OutputFrameSegment {
+  bytes: Uint8Array;
+  offset: number;
+  byteLength: number;
+}
+
+interface SkipCueAudio {
+  bytes: Uint8Array;
+  frames: ParsedFrame[];
+  durationMs: number;
+}
+
 function toBase64(binary: string): string {
   return btoa(binary);
 }
@@ -241,20 +253,84 @@ export function parseMp3Audio(buffer: ArrayBuffer): ParsedMp3 {
   };
 }
 
-function buildOutputBytes(sourceBytes: Uint8Array, prefixByteLength: number, frames: ParsedFrame[]): Uint8Array {
-  const totalFrameBytes = frames.reduce((sum, frame) => sum + frame.byteLength, 0);
+function buildOutputBytes(sourceBytes: Uint8Array, prefixByteLength: number, segments: OutputFrameSegment[]): Uint8Array {
+  const totalFrameBytes = segments.reduce((sum, segment) => sum + segment.byteLength, 0);
   const output = new Uint8Array(prefixByteLength + totalFrameBytes);
   output.set(sourceBytes.subarray(0, prefixByteLength), 0);
 
   let cursor = prefixByteLength;
 
-  for (const frame of frames) {
-    const frameBytes = sourceBytes.subarray(frame.offset, frame.offset + frame.byteLength);
+  for (const segment of segments) {
+    const frameBytes = segment.bytes.subarray(segment.offset, segment.offset + segment.byteLength);
     output.set(frameBytes, cursor);
-    cursor += frame.byteLength;
+    cursor += segment.byteLength;
   }
 
   return output;
+}
+
+function parseSkipCueAudio(bytes: Uint8Array | undefined): SkipCueAudio | null {
+  if (!bytes) {
+    return null;
+  }
+
+  const parsed = parseMp3Audio(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+
+  return {
+    bytes,
+    frames: parsed.frames,
+    durationMs: parsed.sourceDurationMs
+  };
+}
+
+function toOutputSegment(bytes: Uint8Array, frame: ParsedFrame): OutputFrameSegment {
+  return {
+    bytes,
+    offset: frame.offset,
+    byteLength: frame.byteLength
+  };
+}
+
+function hasRemovedAudioBeforeFrame(
+  frame: ParsedFrame,
+  previousFrame: ParsedFrame | undefined,
+  removedRanges: TimeRange[]
+): boolean {
+  const gapStartMs = previousFrame?.endMs ?? 0;
+  const gapEndMs = frame.startMs;
+
+  if (gapEndMs <= gapStartMs + FRAME_MERGE_EPSILON_MS) {
+    return false;
+  }
+
+  return removedRanges.some((range) => isRangeOverlapping(range, { startMs: gapStartMs, endMs: gapEndMs }));
+}
+
+function buildOutputFramesWithSkipCues(
+  sourceBytes: Uint8Array,
+  keptFrames: ParsedFrame[],
+  removedRanges: TimeRange[],
+  cue: SkipCueAudio | null
+): { segments: OutputFrameSegment[]; cueCount: number; cueDurationMs: number } {
+  const segments: OutputFrameSegment[] = [];
+  let previousSourceFrame: ParsedFrame | undefined;
+  let cueCount = 0;
+  let cueDurationMs = 0;
+
+  for (const frame of keptFrames) {
+    if (cue && hasRemovedAudioBeforeFrame(frame, previousSourceFrame, removedRanges)) {
+      for (const cueFrame of cue.frames) {
+        segments.push(toOutputSegment(cue.bytes, cueFrame));
+      }
+      cueCount += 1;
+      cueDurationMs += cue.durationMs;
+    }
+
+    segments.push(toOutputSegment(sourceBytes, frame));
+    previousSourceFrame = frame;
+  }
+
+  return { segments, cueCount, cueDurationMs };
 }
 
 export function canSpliceMp3(contentType: string): boolean {
@@ -264,7 +340,8 @@ export function canSpliceMp3(contentType: string): boolean {
 export function spliceMp3Audio(
   buffer: ArrayBuffer,
   contentType: string,
-  adSpans: Array<{ startMs: number; endMs: number }>
+  adSpans: Array<{ startMs: number; endMs: number }>,
+  options: { skipCueBytes?: Uint8Array } = {}
 ): { bytes: Uint8Array; manifest: AudioRewriteManifest } {
   const parsed = parseMp3Audio(buffer);
   const normalizedRemovedRanges = mergeRanges(
@@ -301,12 +378,25 @@ export function spliceMp3Audio(
     }))
   );
   const actualRemovedRanges = invertRanges(parsed.sourceDurationMs, actualRetainedRanges);
-  const cleanedDurationMs = actualRetainedRanges.reduce((sum, range) => sum + (range.endMs - range.startMs), 0);
-  const output = buildOutputBytes(new Uint8Array(buffer), parsed.prefixByteLength, keptFrames);
+  const sourceBytes = new Uint8Array(buffer);
+  const outputFrames = buildOutputFramesWithSkipCues(
+    sourceBytes,
+    keptFrames,
+    normalizedRemovedRanges,
+    parseSkipCueAudio(options.skipCueBytes)
+  );
+  const cleanedDurationMs =
+    actualRetainedRanges.reduce((sum, range) => sum + (range.endMs - range.startMs), 0)
+    + outputFrames.cueDurationMs;
+  const output = buildOutputBytes(sourceBytes, parsed.prefixByteLength, outputFrames.segments);
   const notes: string[] = [];
 
   if (parsed.hasXingTag) {
     notes.push("Dropped the leading Xing/LAME frame so VBR metadata does not lie about the rewritten output.");
+  }
+
+  if (outputFrames.cueCount > 0) {
+    notes.push(`Inserted ${outputFrames.cueCount} short tone cue(s) at ad removal boundaries.`);
   }
 
   return {

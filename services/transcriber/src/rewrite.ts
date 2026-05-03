@@ -15,6 +15,9 @@ import {
 import { downloadToTmp } from "./downloads.js";
 import { cleanupFile, getFileSizeBytes } from "./speedup.js";
 
+const SKIP_CUE_MP3_URL = new URL("../../../packages/shared/src/assets/skip-cue.mp3", import.meta.url);
+let skipCueBytes: Promise<Uint8Array> | null = null;
+
 export interface RewriteSpan {
   startMs: number;
   endMs: number;
@@ -37,6 +40,11 @@ export interface RewriteAudioResult {
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+async function readSkipCueBytes(): Promise<Uint8Array> {
+  skipCueBytes ??= readFile(SKIP_CUE_MP3_URL);
+  return skipCueBytes;
 }
 
 function createPassthroughManifest(contentType: string, adSpans: RewriteSpan[]): AudioRewriteManifest {
@@ -81,7 +89,9 @@ export async function rewriteAudioFromUrl(input: RewriteAudioRequest): Promise<R
       };
     }
 
-    const rewritten = spliceMp3Audio(toArrayBuffer(sourceBuffer), contentType, input.adSpans);
+    const rewritten = spliceMp3Audio(toArrayBuffer(sourceBuffer), contentType, input.adSpans, {
+      skipCueBytes: await readSkipCueBytes()
+    });
     return {
       contentType,
       bytes: rewritten.bytes,
