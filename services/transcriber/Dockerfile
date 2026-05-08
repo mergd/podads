@@ -1,8 +1,14 @@
 FROM oven/bun:1.3-debian
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+RUN for attempt in 1 2 3; do \
+      apt-get update -o Acquire::Retries=3 && \
+      apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg && \
+      rm -rf /var/lib/apt/lists/* && \
+      break; \
+      if [ "$attempt" = "3" ]; then exit 1; fi; \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep 5; \
+    done
 
 WORKDIR /app
 COPY package.json ./
