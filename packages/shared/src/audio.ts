@@ -51,6 +51,53 @@ interface SkipCueAudio {
   bytes: Uint8Array;
   frames: ParsedFrame[];
   durationMs: number;
+  /** MPEG version + layer + sample rate + channel mode of the cue's first frame. */
+  spliceSignature: number | null;
+}
+
+/**
+ * Frame fields that must match between two MP3 streams for raw frame-byte
+ * concatenation to decode without artifacts: MPEG version, layer, sample rate,
+ * and channel mode. Bitrate is intentionally ignored — MP3 streams can switch
+ * bitrate between frames freely (VBR), and most decoders handle that fine.
+ *
+ * Channel mode in particular is critical: mono frames use 17 bytes of side
+ * info, the other modes use 32, so a mismatch desynchronises every following
+ * frame's bit-reservoir reference and causes the "crunchy audio" failure.
+ */
+function readSpliceSignature(bytes: Uint8Array, offset: number): number | null {
+  if (offset + 4 > bytes.byteLength) {
+    return null;
+  }
+
+  const sync = bytes[offset] ?? 0;
+  const b1 = bytes[offset + 1] ?? 0;
+  const b2 = bytes[offset + 2] ?? 0;
+  const b3 = bytes[offset + 3] ?? 0;
+
+  if (sync !== 0xff || (b1 & 0xe0) !== 0xe0) {
+    return null;
+  }
+
+  const versionAndLayer = b1 & 0b00011110;
+  const samplingRateBits = b2 & 0b00001100;
+  const channelModeBits = b3 & 0b11000000;
+
+  return (versionAndLayer << 16) | (samplingRateBits << 8) | channelModeBits;
+}
+
+/**
+ * Build a self-contained silent MP3 frame whose 4-byte header is byte-identical
+ * to a source frame. Side-info + main-data are zeroed, so `main_data_begin = 0`
+ * (no bit-reservoir reference) and the Huffman-decoded coefficients are all
+ * zero (silence). The protection bit is forced to 1 ("no CRC") so we don't
+ * have to compute a CRC for the zeroed body.
+ */
+function buildSilentFrameBytes(sourceBytes: Uint8Array, templateFrame: ParsedFrame): Uint8Array {
+  const frame = new Uint8Array(templateFrame.byteLength);
+  frame.set(sourceBytes.subarray(templateFrame.offset, templateFrame.offset + 4), 0);
+  frame[1] = (frame[1] ?? 0) | 0x01;
+  return frame;
 }
 
 function toBase64(binary: string): string {
@@ -275,11 +322,14 @@ function parseSkipCueAudio(bytes: Uint8Array | undefined): SkipCueAudio | null {
   }
 
   const parsed = parseMp3Audio(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  const firstFrame = parsed.frames[0];
+  const spliceSignature = firstFrame ? readSpliceSignature(bytes, firstFrame.offset) : null;
 
   return {
     bytes,
     frames: parsed.frames,
-    durationMs: parsed.sourceDurationMs
+    durationMs: parsed.sourceDurationMs,
+    spliceSignature
   };
 }
 
@@ -306,31 +356,97 @@ function hasRemovedAudioBeforeFrame(
   return removedRanges.some((range) => isRangeOverlapping(range, { startMs: gapStartMs, endMs: gapEndMs }));
 }
 
+interface SkipCuePlan {
+  /** Output segments that represent one cue insertion. */
+  segments: OutputFrameSegment[];
+  /** Approximate duration of one cue insertion, in ms. */
+  durationMs: number;
+  /** Either `audible-cue` (header-compatible) or `silent-fallback`. */
+  mode: "audible-cue" | "silent-fallback";
+}
+
+function planSkipCueInsertion(
+  sourceBytes: Uint8Array,
+  templateFrame: ParsedFrame | undefined,
+  cue: SkipCueAudio | null
+): SkipCuePlan | null {
+  if (!cue || !templateFrame) {
+    return null;
+  }
+
+  const sourceSignature = readSpliceSignature(sourceBytes, templateFrame.offset);
+
+  if (
+    sourceSignature !== null
+    && cue.spliceSignature !== null
+    && sourceSignature === cue.spliceSignature
+  ) {
+    return {
+      segments: cue.frames.map((cueFrame) => toOutputSegment(cue.bytes, cueFrame)),
+      durationMs: cue.durationMs,
+      mode: "audible-cue"
+    };
+  }
+
+  // Header mismatch: emit silent frames cloned from the source's own header so
+  // every inserted frame has identical version/layer/sample rate/channel mode
+  // to the surrounding stream and has no bit-reservoir reference.
+  const frameDurationMs = templateFrame.endMs - templateFrame.startMs;
+  if (frameDurationMs <= 0) {
+    return null;
+  }
+
+  const frameCount = Math.max(1, Math.round(cue.durationMs / frameDurationMs));
+  const silentFrameBytes = buildSilentFrameBytes(sourceBytes, templateFrame);
+  const silentSegment: OutputFrameSegment = {
+    bytes: silentFrameBytes,
+    offset: 0,
+    byteLength: silentFrameBytes.byteLength
+  };
+
+  return {
+    segments: Array.from({ length: frameCount }, () => silentSegment),
+    durationMs: frameCount * frameDurationMs,
+    mode: "silent-fallback"
+  };
+}
+
 function buildOutputFramesWithSkipCues(
   sourceBytes: Uint8Array,
   keptFrames: ParsedFrame[],
   removedRanges: TimeRange[],
   cue: SkipCueAudio | null
-): { segments: OutputFrameSegment[]; cueCount: number; cueDurationMs: number } {
+): {
+  segments: OutputFrameSegment[];
+  audibleCueCount: number;
+  silentFallbackCount: number;
+  cueDurationMs: number;
+} {
   const segments: OutputFrameSegment[] = [];
+  const cuePlan = planSkipCueInsertion(sourceBytes, keptFrames[0], cue);
   let previousSourceFrame: ParsedFrame | undefined;
-  let cueCount = 0;
+  let audibleCueCount = 0;
+  let silentFallbackCount = 0;
   let cueDurationMs = 0;
 
   for (const frame of keptFrames) {
-    if (cue && hasRemovedAudioBeforeFrame(frame, previousSourceFrame, removedRanges)) {
-      for (const cueFrame of cue.frames) {
-        segments.push(toOutputSegment(cue.bytes, cueFrame));
+    if (cuePlan && hasRemovedAudioBeforeFrame(frame, previousSourceFrame, removedRanges)) {
+      for (const segment of cuePlan.segments) {
+        segments.push(segment);
       }
-      cueCount += 1;
-      cueDurationMs += cue.durationMs;
+      cueDurationMs += cuePlan.durationMs;
+      if (cuePlan.mode === "audible-cue") {
+        audibleCueCount += 1;
+      } else {
+        silentFallbackCount += 1;
+      }
     }
 
     segments.push(toOutputSegment(sourceBytes, frame));
     previousSourceFrame = frame;
   }
 
-  return { segments, cueCount, cueDurationMs };
+  return { segments, audibleCueCount, silentFallbackCount, cueDurationMs };
 }
 
 export function canSpliceMp3(contentType: string): boolean {
@@ -395,8 +511,14 @@ export function spliceMp3Audio(
     notes.push("Dropped the leading Xing/LAME frame so VBR metadata does not lie about the rewritten output.");
   }
 
-  if (outputFrames.cueCount > 0) {
-    notes.push(`Inserted ${outputFrames.cueCount} short tone cue(s) at ad removal boundaries.`);
+  if (outputFrames.audibleCueCount > 0) {
+    notes.push(`Inserted ${outputFrames.audibleCueCount} short tone cue(s) at ad removal boundaries.`);
+  }
+
+  if (outputFrames.silentFallbackCount > 0) {
+    notes.push(
+      `Inserted ${outputFrames.silentFallbackCount} silent gap(s) at ad removal boundaries because the skip cue's MPEG header (version/layer/sample rate/channel mode) did not match the source stream.`
+    );
   }
 
   return {

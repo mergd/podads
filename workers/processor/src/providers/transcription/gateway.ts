@@ -52,6 +52,11 @@ function sumDefinedNumbers(...values: Array<number | undefined>): number | undef
 const GATEWAY_TIMEOUT_MS = 290_000;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504, 524]);
+const RETRYABLE_PROVIDER_FAILURE_PATTERN = /\b(?:Groq|Mistral)\s+(?:500|502|503|504)\b/;
+
+function isRetryableGatewayFailure(status: number, body: string): boolean {
+  return RETRYABLE_STATUS_CODES.has(status) || (status === 500 && RETRYABLE_PROVIDER_FAILURE_PATTERN.test(body));
+}
 
 function parseRetryAfterSeconds(headerValue: string | null, body: string): number | undefined {
   if (headerValue) {
@@ -111,7 +116,7 @@ async function fetchGateway(
       );
     }
 
-    if (!RETRYABLE_STATUS_CODES.has(response.status)) {
+    if (!isRetryableGatewayFailure(response.status, text)) {
       throw new Error(`Transcription gateway failed (${response.status}): ${text}`);
     }
 

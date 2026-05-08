@@ -7,6 +7,7 @@ import { downloadToTmp, saveUploadToTmp } from "./downloads.js";
 import {
   createGroqKeyPool,
   GroqRateLimitError,
+  GroqRetryableError,
   parseGroqKeyConfigs,
   transcribeWithGroq,
   type TranscriptionResult
@@ -188,14 +189,19 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
             SPEED_MULTIPLIER,
           );
         } catch (error) {
-          if (!(error instanceof GroqRateLimitError) || error.scope !== "all-keys") {
+          const canFallbackToMistral =
+            (error instanceof GroqRateLimitError && error.scope === "all-keys")
+            || error instanceof GroqRetryableError;
+
+          if (!canFallbackToMistral) {
             throw error;
           }
 
-          const retryAfterSeconds = error.retryAfterSeconds ?? 60;
           if (!MISTRAL_API_KEY) {
+            const retryAfterSeconds = error.retryAfterSeconds ?? 60;
+            const statusCode = error instanceof GroqRetryableError ? 503 : 429;
             reply.header("Retry-After", String(retryAfterSeconds));
-            return reply.status(429).send({
+            return reply.status(statusCode).send({
               error: error.message,
               retry_after_seconds: retryAfterSeconds
             });
@@ -223,6 +229,15 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         const retryAfterSeconds = error.retryAfterSeconds ?? 60;
         reply.header("Retry-After", String(retryAfterSeconds));
         return reply.status(429).send({
+          error: error.message,
+          retry_after_seconds: retryAfterSeconds
+        });
+      }
+
+      if (error instanceof GroqRetryableError) {
+        const retryAfterSeconds = error.retryAfterSeconds ?? 60;
+        reply.header("Retry-After", String(retryAfterSeconds));
+        return reply.status(503).send({
           error: error.message,
           retry_after_seconds: retryAfterSeconds
         });

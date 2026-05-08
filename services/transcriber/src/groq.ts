@@ -29,6 +29,7 @@ export interface TranscriptionResult {
 const GROQ_CONCURRENCY = 3;
 const GROQ_REQUEST_TIMEOUT_MS = 180_000;
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
+const RETRYABLE_GROQ_STATUS_CODES = new Set([500, 502, 503, 504]);
 
 export interface GroqKeyConfig {
   apiKey: string;
@@ -65,6 +66,18 @@ export class GroqInvalidKeyError extends Error {
     super(message);
     this.name = "GroqInvalidKeyError";
     this.status = status;
+  }
+}
+
+export class GroqRetryableError extends Error {
+  statusCode: number;
+  retryAfterSeconds?: number;
+
+  constructor(message: string, statusCode: number, retryAfterSeconds?: number) {
+    super(message);
+    this.name = "GroqRetryableError";
+    this.statusCode = statusCode;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -228,6 +241,14 @@ async function transcribeChunk(
 
       if (response.status === 401 || response.status === 403) {
         throw new GroqInvalidKeyError(`Groq ${response.status}: ${body}`, response.status);
+      }
+
+      if (RETRYABLE_GROQ_STATUS_CODES.has(response.status)) {
+        throw new GroqRetryableError(
+          `Groq ${response.status}: ${body}`,
+          response.status,
+          parseRetryAfterSeconds(response.headers.get("retry-after"), body) ?? DEFAULT_RETRY_AFTER_SECONDS
+        );
       }
 
       throw new Error(`Groq ${response.status}: ${body}`);
