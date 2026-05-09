@@ -15,7 +15,7 @@ export interface TimeRange {
 }
 
 export interface AudioRewriteManifest {
-  mode: "mp3-frame-splice" | "passthrough";
+  mode: "mp3-frame-splice" | "ffmpeg-reencode" | "passthrough";
   sourceContentType: string;
   sourceDurationMs: number | null;
   cleanedDurationMs: number | null;

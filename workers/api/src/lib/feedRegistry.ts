@@ -68,6 +68,7 @@ function parseStringArray(value: unknown): string[] {
 function normalizeAudioRewriteMode(value: unknown): EpisodeProcessingDiagnostics["audioRewriteMode"] {
   switch (value) {
     case "mp3-frame-splice":
+    case "ffmpeg-reencode":
     case "passthrough":
       return value;
     default:

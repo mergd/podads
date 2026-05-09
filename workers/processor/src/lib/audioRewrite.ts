@@ -5,26 +5,12 @@ import {
   decodeManifestHeader
 } from "@podads/shared/audio";
 
-import { spliceMp3Audio } from "./mp3Surgery";
 import { RetryableProcessingError } from "./retryable";
 import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
-const MAX_IN_MEMORY_AUDIO_REWRITE_BYTES = 30 * 1024 * 1024;
 const GATEWAY_TIMEOUT_MS = 290_000;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504, 524]);
-
-class OversizedAudioRewriteError extends Error {
-  sourceBytes: number;
-
-  constructor(sourceBytes: number) {
-    super(
-      `Audio source ${formatBytes(sourceBytes)} exceeds the Worker in-memory rewrite limit of ${formatBytes(MAX_IN_MEMORY_AUDIO_REWRITE_BYTES)}. Route this episode through Railway-side audio rewrite.`
-    );
-    this.name = "OversizedAudioRewriteError";
-    this.sourceBytes = sourceBytes;
-  }
-}
 
 function extensionFromContentType(contentType: string | null): string {
   switch (contentType) {
@@ -46,18 +32,6 @@ function parseContentLength(headerValue: string | null): number | null {
 
   const parsed = Number.parseInt(headerValue, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function createOversizedRewriteError(sourceBytes: number): Error {
-  return new OversizedAudioRewriteError(sourceBytes);
 }
 
 function parseRetryAfterSeconds(headerValue: string | null, body: string): number | undefined {
@@ -87,57 +61,6 @@ function parseRetryAfterSeconds(headerValue: string | null, body: string): numbe
   const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
 
   return totalSeconds > 0 ? totalSeconds : undefined;
-}
-
-async function readArrayBufferWithLimit(response: Response, maxBytes: number): Promise<ArrayBuffer> {
-  const contentLength = parseContentLength(response.headers.get("content-length"));
-
-  if (contentLength !== null && contentLength > maxBytes) {
-    throw createOversizedRewriteError(contentLength);
-  }
-
-  if (!response.body) {
-    return response.arrayBuffer();
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      if (!value) {
-        continue;
-      }
-
-      totalBytes += value.byteLength;
-
-      if (totalBytes > maxBytes) {
-        await reader.cancel();
-        throw createOversizedRewriteError(totalBytes);
-      }
-
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const merged = new Uint8Array(totalBytes);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-
-  return merged.buffer;
 }
 
 function buildPutOptions(contentType: string, adSpanCount: number, processingVersion: string, rewriteMode: string) {
@@ -285,7 +208,7 @@ export async function rewriteAudio(
   env: Env,
   sourceUrl: string,
   sourceContentType: string | null,
-  sourceContentLength: number | null,
+  _sourceContentLength: number | null,
   feedId: number,
   episodeId: number,
   processingVersion: string,
@@ -307,60 +230,14 @@ export async function rewriteAudio(
     );
   }
 
-  if (
-    sourceContentType
-    && canSpliceMp3(sourceContentType)
-    && sourceContentLength !== null
-    && sourceContentLength > MAX_IN_MEMORY_AUDIO_REWRITE_BYTES
-  ) {
+  if (sourceContentType && canSpliceMp3(sourceContentType) && env.TRANSCRIPTION_GATEWAY_URL) {
     const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extensionFromContentType(sourceContentType)}`;
     return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans);
   }
 
-  const response = await fetch(sourceUrl, {
-    headers: {
-      "user-agent": "podads-bot/0.1"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Audio download failed with status ${response.status}`);
-  }
-
-  const contentType = response.headers.get("content-type") ?? sourceContentType ?? "audio/mpeg";
-  const contentLength = parseContentLength(response.headers.get("content-length"));
-  const extension = extensionFromContentType(contentType);
-  const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extension}`;
-  if (!canSpliceMp3(contentType)) {
-    return createPassthroughResult(
-      contentType,
-      adSpans,
-      `Skipped audio surgery because ${contentType} is not yet supported for frame-level splicing; serving the source enclosure avoids storing a passthrough copy.`
-    );
-  }
-
-  if (contentLength !== null && contentLength > MAX_IN_MEMORY_AUDIO_REWRITE_BYTES) {
-    return rewriteAudioViaGateway(env, sourceUrl, contentType, key, processingVersion, adSpans);
-  }
-
-  try {
-    const arrayBuffer = await readArrayBufferWithLimit(response, MAX_IN_MEMORY_AUDIO_REWRITE_BYTES);
-    const rewritten = spliceMp3Audio(arrayBuffer, contentType, adSpans);
-    await env.AUDIO_BUCKET.put(
-      key,
-      rewritten.bytes,
-      buildPutOptions(contentType, adSpans.length, processingVersion, rewritten.manifest.mode)
-    );
-    return {
-      key,
-      bytesWritten: rewritten.bytes.byteLength,
-      manifest: rewritten.manifest
-    };
-  } catch (error) {
-    if (error instanceof OversizedAudioRewriteError) {
-      return rewriteAudioViaGateway(env, sourceUrl, contentType, key, processingVersion, adSpans);
-    }
-
-    throw error;
-  }
+  return createPassthroughResult(
+    sourceContentType ?? "audio/mpeg",
+    adSpans,
+    "Skipped audio surgery because the ffmpeg rewrite gateway is not configured; serving the source enclosure avoids generating fragile MP3 frame-spliced output."
+  );
 }

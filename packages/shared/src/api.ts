@@ -30,7 +30,7 @@ export interface EpisodeProcessingDiagnostics {
   detectedAdSpanCount: number | null;
   openingAdSpanCount: number | null;
   adDetectionReasons: string[];
-  audioRewriteMode: "mp3-frame-splice" | "passthrough" | null;
+  audioRewriteMode: "mp3-frame-splice" | "ffmpeg-reencode" | "passthrough" | null;
   sourceDurationMs: number | null;
   cleanedDurationMs: number | null;
   removedDurationMs: number | null;
