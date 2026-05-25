@@ -449,6 +449,96 @@ function buildOutputFramesWithSkipCues(
   return { segments, audibleCueCount, silentFallbackCount, cueDurationMs };
 }
 
+export function outputBoundaryTimesMs(retainedRanges: TimeRange[]): number[] {
+  const boundaries: number[] = [];
+  let cursor = 0;
+
+  for (let index = 0; index < retainedRanges.length - 1; index += 1) {
+    const range = retainedRanges[index];
+    if (!range) {
+      continue;
+    }
+
+    cursor += range.endMs - range.startMs;
+    boundaries.push(cursor);
+  }
+
+  return boundaries;
+}
+
+export function insertSkipCuesAtBoundaries(
+  buffer: ArrayBuffer,
+  boundaryTimesMs: number[],
+  skipCueBytes?: Uint8Array
+): {
+  bytes: Uint8Array;
+  audibleCueCount: number;
+  silentFallbackCount: number;
+  cueDurationMs: number;
+  droppedXingTag: boolean;
+} {
+  const unchanged = {
+    bytes: new Uint8Array(buffer),
+    audibleCueCount: 0,
+    silentFallbackCount: 0,
+    cueDurationMs: 0,
+    droppedXingTag: false
+  };
+
+  if (!skipCueBytes || boundaryTimesMs.length === 0) {
+    return unchanged;
+  }
+
+  const parsed = parseMp3Audio(buffer);
+  const sourceBytes = new Uint8Array(buffer);
+  const cue = parseSkipCueAudio(skipCueBytes);
+  const framesEligibleForOutput = parsed.hasXingTag ? parsed.frames.slice(1) : parsed.frames;
+
+  if (framesEligibleForOutput.length === 0) {
+    throw new Error("No MP3 frames available for skip cue insertion.");
+  }
+
+  const sortedBoundaries = [...boundaryTimesMs].sort((left, right) => left - right);
+  const segments: OutputFrameSegment[] = [];
+  const cuePlan = planSkipCueInsertion(sourceBytes, framesEligibleForOutput[0], cue);
+  let boundaryIndex = 0;
+  let audibleCueCount = 0;
+  let silentFallbackCount = 0;
+  let cueDurationMs = 0;
+
+  for (const frame of framesEligibleForOutput) {
+    while (
+      cuePlan
+      && boundaryIndex < sortedBoundaries.length
+      && frame.startMs >= sortedBoundaries[boundaryIndex]! - FRAME_MERGE_EPSILON_MS
+    ) {
+      for (const segment of cuePlan.segments) {
+        segments.push(segment);
+      }
+
+      cueDurationMs += cuePlan.durationMs;
+
+      if (cuePlan.mode === "audible-cue") {
+        audibleCueCount += 1;
+      } else {
+        silentFallbackCount += 1;
+      }
+
+      boundaryIndex += 1;
+    }
+
+    segments.push(toOutputSegment(sourceBytes, frame));
+  }
+
+  return {
+    bytes: buildOutputBytes(sourceBytes, parsed.prefixByteLength, segments),
+    audibleCueCount,
+    silentFallbackCount,
+    cueDurationMs,
+    droppedXingTag: parsed.hasXingTag
+  };
+}
+
 export function canSpliceMp3(contentType: string): boolean {
   return MP3_CONTENT_TYPES.has(contentType.toLowerCase());
 }

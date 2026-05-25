@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import skipCueMp3 from "@podads/shared/assets/skip-cue.mp3";
 import {
   AUDIO_REWRITE_BYTES_WRITTEN_HEADER,
   AUDIO_REWRITE_DOWNLOAD_MS_HEADER,
@@ -12,6 +13,8 @@ import {
   AUDIO_REWRITE_SOURCE_BYTES_HEADER,
   canSpliceMp3,
   encodeManifestHeader,
+  insertSkipCuesAtBoundaries,
+  outputBoundaryTimesMs,
   type AudioRewriteManifest
 } from "@podads/shared/audio";
 
@@ -173,24 +176,47 @@ async function rewriteMp3WithFfmpeg(
       outputPath
     ], { timeout: FFMPEG_REWRITE_TIMEOUT_MS });
 
-    const bytes = await readFile(outputPath);
-    const cleanedDurationMs = retainedRanges.reduce((sum, range) => sum + (range.endMs - range.startMs), 0);
+    const ffmpegBytes = await readFile(outputPath);
+    const retainedDurationMs = retainedRanges.reduce((sum, range) => sum + (range.endMs - range.startMs), 0);
+    const skipCueResult = insertSkipCuesAtBoundaries(
+      ffmpegBytes.buffer.slice(
+        ffmpegBytes.byteOffset,
+        ffmpegBytes.byteOffset + ffmpegBytes.byteLength
+      ),
+      outputBoundaryTimesMs(retainedRanges),
+      new Uint8Array(skipCueMp3)
+    );
+    const notes = [
+      "Re-encoded retained audio ranges with ffmpeg so podcast clients receive a fresh MP3 stream after ad cuts."
+    ];
+
+    if (skipCueResult.droppedXingTag) {
+      notes.push("Dropped the leading Xing/LAME frame so VBR metadata does not lie about the rewritten output.");
+    }
+
+    if (skipCueResult.audibleCueCount > 0) {
+      notes.push(`Inserted ${skipCueResult.audibleCueCount} short tone cue(s) at ad removal boundaries.`);
+    }
+
+    if (skipCueResult.silentFallbackCount > 0) {
+      notes.push(
+        `Inserted ${skipCueResult.silentFallbackCount} silent gap(s) at ad removal boundaries because the skip cue's MPEG header (version/layer/sample rate/channel mode) did not match the source stream.`
+      );
+    }
 
     return {
-      bytes,
+      bytes: skipCueResult.bytes,
       manifest: {
         mode: "ffmpeg-reencode",
         sourceContentType: OUTPUT_CONTENT_TYPE,
         sourceDurationMs,
-        cleanedDurationMs,
+        cleanedDurationMs: retainedDurationMs + skipCueResult.cueDurationMs,
         requestedRemovedRanges: adSpans.map((span) => ({ startMs: span.startMs, endMs: span.endMs })),
         actualRemovedRanges: removedRanges,
         retainedRanges,
         frameCount: null,
         keptFrameCount: null,
-        notes: [
-          "Re-encoded retained audio ranges with ffmpeg so podcast clients receive a fresh MP3 stream after ad cuts."
-        ]
+        notes
       }
     };
   } finally {
