@@ -317,7 +317,7 @@ function buildOutputBytes(sourceBytes: Uint8Array, prefixByteLength: number, seg
 }
 
 function parseSkipCueAudio(bytes: Uint8Array | undefined): SkipCueAudio | null {
-  if (!bytes) {
+  if (!bytes || bytes.byteLength === 0) {
     return null;
   }
 
@@ -485,7 +485,7 @@ export function insertSkipCuesAtBoundaries(
     droppedXingTag: false
   };
 
-  if (!skipCueBytes || boundaryTimesMs.length === 0) {
+  if (!skipCueBytes || skipCueBytes.byteLength === 0 || boundaryTimesMs.length === 0) {
     return unchanged;
   }
 

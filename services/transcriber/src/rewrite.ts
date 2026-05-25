@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import skipCueMp3 from "@podads/shared/assets/skip-cue.mp3";
 import {
   AUDIO_REWRITE_BYTES_WRITTEN_HEADER,
   AUDIO_REWRITE_DOWNLOAD_MS_HEADER,
@@ -19,6 +18,7 @@ import {
 } from "@podads/shared/audio";
 
 import { downloadToTmp } from "./downloads.js";
+import { getSkipCueBytes } from "./skipCue.js";
 import { cleanupFile, getFileSizeBytes } from "./speedup.js";
 
 const execFileAsync = promisify(execFile);
@@ -184,7 +184,7 @@ async function rewriteMp3WithFfmpeg(
         ffmpegBytes.byteOffset + ffmpegBytes.byteLength
       ),
       outputBoundaryTimesMs(retainedRanges),
-      new Uint8Array(skipCueMp3)
+      getSkipCueBytes()
     );
     const notes = [
       "Re-encoded retained audio ranges with ffmpeg so podcast clients receive a fresh MP3 stream after ad cuts."
