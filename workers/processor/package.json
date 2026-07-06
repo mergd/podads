@@ -12,6 +12,7 @@
     "types": "wrangler types"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
     "@podads/shared": "workspace:*",
     "mp3-parser": "^0.3.0"
   },

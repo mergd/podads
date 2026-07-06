@@ -6,6 +6,9 @@ import { getNextRetryAttempt, getRetryDelaySeconds, stampRetryMessage } from "./
 import { recoverStaleEpisodeJobs } from "./lib/staleJobs";
 import type { EpisodeJobMessage } from "./lib/types";
 
+export { TranscriberContainer } from "./transcriberContainer";
+import { transcriberFetch } from "./transcriberContainer";
+
 function assertNever(value: never): never {
   throw new Error(`Unhandled queue message type: ${value}`);
 }
@@ -53,7 +56,13 @@ async function markUnhandledQueueFailure(env: Env, message: EpisodeJobMessage, e
 }
 
 export default {
-  async fetch(): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/transcriber-health") {
+      const response = await transcriberFetch(env, "/health", { method: "GET" });
+      return new Response(response.body, { status: response.status });
+    }
+
     return new Response("ok", { status: 200 });
   },
 

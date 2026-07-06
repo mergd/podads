@@ -6,6 +6,7 @@ import {
 } from "@podads/shared/audio";
 
 import { RetryableProcessingError } from "./retryable";
+import { transcriberFetch } from "../transcriberContainer";
 import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
 const GATEWAY_TIMEOUT_MS = 290_000;
@@ -102,13 +103,12 @@ function createPassthroughResult(contentType: string, adSpans: AdSpan[], note: s
   };
 }
 
-async function fetchRewriteFromGateway(url: string, gatewayToken: string | undefined, body: string): Promise<Response> {
+async function fetchRewriteFromGateway(env: Env, path: string, body: string): Promise<Response> {
   try {
-    const response = await fetch(url, {
+    const response = await transcriberFetch(env, path, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
-        ...(gatewayToken ? { authorization: `Bearer ${gatewayToken}` } : {})
+        "content-type": "application/json"
       },
       body,
       signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
@@ -159,14 +159,9 @@ async function rewriteAudioViaGateway(
   processingVersion: string,
   adSpans: AdSpan[]
 ): Promise<AudioRewriteResult> {
-  const baseUrl = env.TRANSCRIPTION_GATEWAY_URL;
-  if (!baseUrl) {
-    throw new Error("Missing TRANSCRIPTION_GATEWAY_URL configuration.");
-  }
-
   const gatewayResponse = await fetchRewriteFromGateway(
-    `${baseUrl.replace(/\/+$/, "")}/v1/audio/rewrite`,
-    env.TRANSCRIPTION_GATEWAY_TOKEN,
+    env,
+    "/v1/audio/rewrite",
     JSON.stringify({
       url: sourceUrl,
       source_content_type: sourceContentType,
@@ -191,11 +186,24 @@ async function rewriteAudioViaGateway(
     throw new Error("Audio rewrite gateway succeeded without a readable body.");
   }
 
-  await env.AUDIO_BUCKET.put(
-    key,
-    gatewayResponse.body,
-    buildPutOptions(manifest.sourceContentType, adSpans.length, processingVersion, manifest.mode)
-  );
+  if (bytesWritten <= 0) {
+    throw new Error("Audio rewrite gateway response did not declare its byte length.");
+  }
+
+  // The container binding delivers the body without a content length, but R2
+  // requires one; re-frame the stream with the exact size the transcriber
+  // reported.
+  const { readable, writable } = new FixedLengthStream(bytesWritten);
+  const pipePromise = gatewayResponse.body.pipeTo(writable);
+
+  await Promise.all([
+    env.AUDIO_BUCKET.put(
+      key,
+      readable,
+      buildPutOptions(manifest.sourceContentType, adSpans.length, processingVersion, manifest.mode)
+    ),
+    pipePromise
+  ]);
 
   return {
     key,
@@ -230,7 +238,7 @@ export async function rewriteAudio(
     );
   }
 
-  if (sourceContentType && canSpliceMp3(sourceContentType) && env.TRANSCRIPTION_GATEWAY_URL) {
+  if (sourceContentType && canSpliceMp3(sourceContentType)) {
     const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extensionFromContentType(sourceContentType)}`;
     return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans);
   }
@@ -238,6 +246,6 @@ export async function rewriteAudio(
   return createPassthroughResult(
     sourceContentType ?? "audio/mpeg",
     adSpans,
-    "Skipped audio surgery because the ffmpeg rewrite gateway is not configured; serving the source enclosure avoids generating fragile MP3 frame-spliced output."
+    "Skipped audio surgery because the enclosure did not declare a content type; serving the source enclosure avoids generating fragile MP3 frame-spliced output."
   );
 }

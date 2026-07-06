@@ -24,7 +24,6 @@ import {
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
 const GROQ_API_KEYS = process.env.GROQ_API_KEYS ?? "";
-const GATEWAY_TOKEN = process.env.TRANSCRIPTION_GATEWAY_TOKEN ?? "";
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY ?? "";
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL ?? "voxtral-mini-latest";
 const SPEED_MULTIPLIER = Number(process.env.SPEED_MULTIPLIER) || 2;
@@ -42,18 +41,9 @@ app.get("/health", async () => ({
   groq_key_count: groqKeys.length,
   mistral_configured: MISTRAL_API_KEY.length > 0,
   mistral_model: MISTRAL_MODEL,
-  gateway_auth_enabled: GATEWAY_TOKEN.length > 0,
   transcription_audio_bitrate: TRANSCRIPTION_AUDIO_BITRATE,
   transcription_audio_sample_rate_hz: TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ,
 }));
-
-function isAuthorized(authHeader: string | undefined): boolean {
-  if (!GATEWAY_TOKEN) {
-    return true;
-  }
-
-  return authHeader === `Bearer ${GATEWAY_TOKEN}`;
-}
 
 interface TranscribeBody {
   analysis_window_ms?: number;
@@ -137,10 +127,6 @@ function truncateTranscriptionResult(
 }
 
 app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, reply) => {
-  if (!isAuthorized(request.headers.authorization)) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
   const start = Date.now();
   const filesToCleanup: string[] = [];
   let downloadMs: number | undefined;
@@ -294,10 +280,6 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
 });
 
 app.post<{ Body: RewriteBody }>("/v1/audio/rewrite", async (request, reply) => {
-  if (!isAuthorized(request.headers.authorization)) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
   const body = request.body as RewriteBody;
   const url = typeof body.url === "string" ? body.url : null;
   const adSpans = normalizeRewriteSpans(body.ad_spans);

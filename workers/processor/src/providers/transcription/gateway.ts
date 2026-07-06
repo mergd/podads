@@ -1,5 +1,6 @@
 import type { EpisodeRecord, TranscriptResult, TranscriptSegment } from "../../lib/types";
 import { RetryableProcessingError } from "../../lib/retryable";
+import { transcriberFetch } from "../../transcriberContainer";
 
 interface GatewaySegment {
   id: number;
@@ -88,16 +89,15 @@ function parseRetryAfterSeconds(headerValue: string | null, body: string): numbe
 }
 
 async function fetchGateway(
-  url: string,
-  gatewayToken: string | undefined,
+  env: Env,
+  path: string,
   body: string
 ): Promise<Response> {
   try {
-    const response = await fetch(url, {
+    const response = await transcriberFetch(env, path, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {})
+        "Content-Type": "application/json"
       },
       body,
       signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
@@ -145,16 +145,10 @@ export async function gatewayTranscription(
   episode: EpisodeRecord,
   analysisWindowMs?: number
 ): Promise<TranscriptResult> {
-  const baseUrl = env.TRANSCRIPTION_GATEWAY_URL;
-  if (!baseUrl) {
-    throw new Error("Missing TRANSCRIPTION_GATEWAY_URL configuration.");
-  }
-  const gatewayToken = env.TRANSCRIPTION_GATEWAY_TOKEN;
-
   const t0 = Date.now();
   const response = await fetchGateway(
-    `${baseUrl.replace(/\/+$/, "")}/v1/audio/transcriptions`,
-    gatewayToken,
+    env,
+    "/v1/audio/transcriptions",
     JSON.stringify({
       url: episode.source_enclosure_url,
       analysis_window_ms: analysisWindowMs

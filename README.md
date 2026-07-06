@@ -24,15 +24,13 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`, which:
 - typechecks `services/transcriber`
 - builds and deploys `ui` to Cloudflare Pages
 - deploys `workers/api` to Cloudflare Workers
-- deploys `workers/processor` to Cloudflare Workers
-- deploys `services/transcriber` to Railway
+- deploys `workers/processor` to Cloudflare Workers (which builds and deploys `services/transcriber` as a Cloudflare Container)
 
 Required GitHub repository secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `DISCORD_PROCESSING_FAILURE_WEBHOOK_URL` for processor failure alerts
-- `RAILWAY_TOKEN`
 
 ## Database
 

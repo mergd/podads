@@ -37,10 +37,32 @@
       }
     ]
   },
+  "containers": [
+    {
+      "class_name": "TranscriberContainer",
+      "image": "../../services/transcriber/Dockerfile",
+      "image_build_context": "../../",
+      "max_instances": 1,
+      "instance_type": "standard-1"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TRANSCRIBER",
+        "class_name": "TranscriberContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TranscriberContainer"]
+    }
+  ],
   "vars": {
     "PROCESSING_VERSION": "v1",
     "CLASSIFICATION_PROVIDER": "openrouter",
-    "TRANSCRIPTION_GATEWAY_URL": "https://transcriber-production-e6f9.up.railway.app",
     "POSTHOG_HOST": "https://us.i.posthog.com"
   },
   "observability": {
