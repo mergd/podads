@@ -11,6 +11,11 @@ export class TranscriberContainer extends Container<Env> {
   defaultPort = 8000;
   sleepAfter = "10m";
 
+  override async onActivityExpired(): Promise<void> {
+    console.log("Transcriber idle timeout expired, destroying container");
+    await this.destroy();
+  }
+
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
     const passthrough: Record<string, string | undefined> = {

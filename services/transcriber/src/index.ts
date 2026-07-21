@@ -31,6 +31,28 @@ const groqKeys = parseGroqKeyConfigs(GROQ_API_KEYS, GROQ_API_KEY);
 const groqKeyPool = createGroqKeyPool(groqKeys);
 
 const app = Fastify({ logger: true, bodyLimit: 200 * 1024 * 1024 });
+let shuttingDown = false;
+
+async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  app.log.info({ signal }, "Shutting down transcriber");
+
+  try {
+    await app.close();
+    process.exit(0);
+  } catch (error) {
+    app.log.error({ error, signal }, "Failed to shut down transcriber cleanly");
+    process.exit(1);
+  }
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+
 await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024 } });
 
 app.get("/health", async () => ({

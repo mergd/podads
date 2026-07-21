@@ -43,7 +43,7 @@
       "image": "../../services/transcriber/Dockerfile",
       "image_build_context": "../../",
       "max_instances": 1,
-      "instance_type": "standard-1"
+      "instance_type": "basic"
     }
   ],
   "durable_objects": {
