@@ -14,6 +14,7 @@ import {
 } from "./groq.js";
 import { MistralRetryableError, transcribeWithMistral } from "./mistral.js";
 import {
+  AudioPrepareTimeoutError,
   cleanupFile,
   getFileSizeBytes,
   prepareAudioForTranscription,
@@ -179,7 +180,21 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     sourceInputBytes = await getFileSizeBytes(rawAudioPath);
 
     const prepareStart = Date.now();
-    const preparedAudioPath = await prepareAudioForTranscription(rawAudioPath, SPEED_MULTIPLIER, analysisWindowMs);
+    let preparedAudioPath: string;
+    try {
+      preparedAudioPath = await prepareAudioForTranscription(rawAudioPath, SPEED_MULTIPLIER, analysisWindowMs);
+    } catch (error) {
+      if (error instanceof AudioPrepareTimeoutError) {
+        const retryAfterSeconds = 30;
+        reply.header("Retry-After", String(retryAfterSeconds));
+        return reply.status(503).send({
+          error: error.message,
+          retry_after_seconds: retryAfterSeconds
+        });
+      }
+
+      throw error;
+    }
     prepareMs = Date.now() - prepareStart;
     if (preparedAudioPath !== rawAudioPath) {
       filesToCleanup.push(preparedAudioPath);

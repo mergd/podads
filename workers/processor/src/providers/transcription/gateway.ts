@@ -50,13 +50,21 @@ function sumDefinedNumbers(...values: Array<number | undefined>): number | undef
   return definedValues.reduce((sum, value) => sum + value, 0);
 }
 
-const GATEWAY_TIMEOUT_MS = 290_000;
+// Must cover download + ffmpeg prepare (up to ~5m on basic) + STT.
+const GATEWAY_TIMEOUT_MS = 600_000;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504, 524]);
 const RETRYABLE_PROVIDER_FAILURE_PATTERN = /\b(?:Groq|Mistral)\s+(?:500|502|503|504)\b/;
+const RETRYABLE_PREPARE_FAILURE_PATTERN = /Audio prepare timed out\b/i;
 
 function isRetryableGatewayFailure(status: number, body: string): boolean {
-  return RETRYABLE_STATUS_CODES.has(status) || (status === 500 && RETRYABLE_PROVIDER_FAILURE_PATTERN.test(body));
+  return (
+    RETRYABLE_STATUS_CODES.has(status)
+    || (status === 500 && (
+      RETRYABLE_PROVIDER_FAILURE_PATTERN.test(body)
+      || RETRYABLE_PREPARE_FAILURE_PATTERN.test(body)
+    ))
+  );
 }
 
 function parseRetryAfterSeconds(headerValue: string | null, body: string): number | undefined {

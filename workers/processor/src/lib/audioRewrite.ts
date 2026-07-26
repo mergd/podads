@@ -9,7 +9,7 @@ import { RetryableProcessingError } from "./retryable";
 import { transcriberFetch } from "../transcriberContainer";
 import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
-const GATEWAY_TIMEOUT_MS = 290_000;
+const GATEWAY_TIMEOUT_MS = 600_000;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504, 524]);
 
