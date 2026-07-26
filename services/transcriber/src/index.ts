@@ -1,7 +1,12 @@
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 
-import { buildRewriteResponseHeaders, rewriteAudioFromUrl, type RewriteSpan } from "./rewrite.js";
+import {
+  AudioRewriteTimeoutError,
+  buildRewriteResponseHeaders,
+  rewriteAudioFromUrl,
+  type RewriteSpan
+} from "./rewrite.js";
 import { sendMistralCapacityAlert } from "./alerts.js";
 import { downloadToTmp, saveUploadToTmp } from "./downloads.js";
 import {
@@ -325,11 +330,26 @@ app.post<{ Body: RewriteBody }>("/v1/audio/rewrite", async (request, reply) => {
     return reply.status(400).send({ error: "Provide a JSON body with 'url' and valid 'ad_spans'" });
   }
 
-  const result = await rewriteAudioFromUrl({
-    url,
-    sourceContentType: typeof body.source_content_type === "string" ? body.source_content_type : null,
-    adSpans
-  });
+  let result;
+  try {
+    result = await rewriteAudioFromUrl({
+      url,
+      sourceContentType: typeof body.source_content_type === "string" ? body.source_content_type : null,
+      adSpans
+    });
+  } catch (error) {
+    if (error instanceof AudioRewriteTimeoutError) {
+      const retryAfterSeconds = 30;
+      reply.header("Retry-After", String(retryAfterSeconds));
+      return reply.status(503).send({
+        error: error.message,
+        retry_after_seconds: retryAfterSeconds
+      });
+    }
+
+    throw error;
+  }
+
   const responseHeaders = buildRewriteResponseHeaders(result);
 
   for (const [headerName, headerValue] of Object.entries(responseHeaders)) {

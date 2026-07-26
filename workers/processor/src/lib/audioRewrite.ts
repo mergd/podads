@@ -9,7 +9,8 @@ import { RetryableProcessingError } from "./retryable";
 import { transcriberFetch } from "../transcriberContainer";
 import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
-const GATEWAY_TIMEOUT_MS = 600_000;
+// Must cover download + full-episode ffmpeg rewrite (up to ~15m on small containers).
+const GATEWAY_TIMEOUT_MS = 900_000;
 const DEFAULT_RETRY_DELAY_SECONDS = 60;
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504, 524]);
 

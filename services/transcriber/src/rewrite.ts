@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,8 +24,19 @@ import { cleanupFile, getFileSizeBytes } from "./speedup.js";
 const execFileAsync = promisify(execFile);
 const OUTPUT_CONTENT_TYPE = "audio/mpeg";
 const OUTPUT_BITRATE = process.env.AUDIO_REWRITE_BITRATE ?? "128k";
-const FFMPEG_REWRITE_TIMEOUT_MS = 300_000;
+// Full-episode re-encode on small containers needs more than 5m for ~90m shows.
+const FFMPEG_REWRITE_TIMEOUT_MS = 900_000;
 const FFPROBE_TIMEOUT_MS = 30_000;
+
+export class AudioRewriteTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`Audio rewrite timed out after ${Math.round(timeoutMs / 1000)}s`);
+    this.name = "AudioRewriteTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
 
 export interface RewriteSpan {
   startMs: number;
@@ -165,16 +176,25 @@ async function rewriteMp3WithFfmpeg(
 
   const outputPath = join(tmpdir(), `rewrite-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
   try {
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-i", inputPath,
-      "-vn",
-      "-map", "0:a:0",
-      "-af", buildAselectFilter(removedRanges),
-      "-codec:a", "libmp3lame",
-      "-b:a", OUTPUT_BITRATE,
-      outputPath
-    ], { timeout: FFMPEG_REWRITE_TIMEOUT_MS });
+    try {
+      await execFileAsync("ffmpeg", [
+        "-y",
+        "-i", inputPath,
+        "-vn",
+        "-map", "0:a:0",
+        "-af", buildAselectFilter(removedRanges),
+        "-codec:a", "libmp3lame",
+        "-b:a", OUTPUT_BITRATE,
+        outputPath
+      ], { timeout: FFMPEG_REWRITE_TIMEOUT_MS });
+    } catch (error) {
+      const execError = error as ExecFileException;
+      if (execError.killed || execError.signal === "SIGTERM") {
+        throw new AudioRewriteTimeoutError(FFMPEG_REWRITE_TIMEOUT_MS);
+      }
+
+      throw error;
+    }
 
     const ffmpegBytes = await readFile(outputPath);
     const retainedDurationMs = retainedRanges.reduce((sum, range) => sum + (range.endMs - range.startMs), 0);
