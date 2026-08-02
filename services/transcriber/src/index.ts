@@ -26,6 +26,7 @@ import {
   TRANSCRIPTION_AUDIO_BITRATE,
   TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ
 } from "./speedup.js";
+import { UpstreamTransportError } from "./upstream.js";
 
 const PORT = Number(process.env.PORT) || 8000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
@@ -316,6 +317,16 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         realtime_factor: elapsed > 0 ? Math.round((result.duration / elapsed) * 10) / 10 : 0,
       },
     };
+  } catch (error) {
+    if (error instanceof UpstreamTransportError) {
+      reply.header("Retry-After", String(error.retryAfterSeconds));
+      return reply.status(503).send({
+        error: error.message,
+        retry_after_seconds: error.retryAfterSeconds
+      });
+    }
+
+    throw error;
   } finally {
     await Promise.all(filesToCleanup.map(cleanupFile));
   }

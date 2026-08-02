@@ -5,13 +5,20 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { UpstreamTransportError } from "./upstream.js";
+
 const DOWNLOAD_TIMEOUT_MS = 180_000;
 
 export async function downloadToTmp(url: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: { "User-Agent": "PodAds/1.0" },
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { "User-Agent": "PodAds/1.0" },
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
+    });
+  } catch (error) {
+    throw new UpstreamTransportError("Audio download", error);
+  }
 
   if (!response.ok) {
     throw new Error(`Download failed (${response.status}): ${url}`);
@@ -19,7 +26,11 @@ export async function downloadToTmp(url: string): Promise<string> {
 
   const tmpPath = join(tmpdir(), `dl-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
   const destination = createWriteStream(tmpPath);
-  await pipeline(Readable.fromWeb(response.body as never), destination);
+  try {
+    await pipeline(Readable.fromWeb(response.body as never), destination);
+  } catch (error) {
+    throw new UpstreamTransportError("Audio download", error);
+  }
   return tmpPath;
 }
 

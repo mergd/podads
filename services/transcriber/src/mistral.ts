@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 import type { TranscriptionResult } from "./groq.js";
+import { UpstreamTransportError } from "./upstream.js";
 
 interface MistralSegment {
   start?: number;
@@ -85,14 +86,19 @@ export async function transcribeWithMistral(
   form.append("temperature", "0");
   form.append("timestamp_granularities", "segment");
 
-  const response = await fetch("https://api.mistral.ai/v1/audio/transcriptions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: form,
-    signal: AbortSignal.timeout(MISTRAL_REQUEST_TIMEOUT_MS)
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://api.mistral.ai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: form,
+      signal: AbortSignal.timeout(MISTRAL_REQUEST_TIMEOUT_MS)
+    });
+  } catch (error) {
+    throw new UpstreamTransportError("Mistral transcription", error);
+  }
 
   if (!response.ok) {
     const body = await response.text();

@@ -3,6 +3,7 @@ import { basename } from "node:path";
 
 import { splitAudioIntoChunks } from "./chunk.js";
 import { cleanupFile } from "./speedup.js";
+import { UpstreamTransportError } from "./upstream.js";
 
 interface GroqSegment {
   id: number;
@@ -221,12 +222,17 @@ async function transcribeChunk(
     form.append("language", "en");
     form.append("temperature", "0");
 
-    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-      signal: AbortSignal.timeout(GROQ_REQUEST_TIMEOUT_MS)
-    });
+    let response: Response;
+    try {
+      response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(GROQ_REQUEST_TIMEOUT_MS)
+      });
+    } catch (error) {
+      throw new UpstreamTransportError("Groq transcription", error);
+    }
 
     if (!response.ok) {
       const body = await response.text();
