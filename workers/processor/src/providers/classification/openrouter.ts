@@ -7,8 +7,8 @@ import {
 import { RetryableProcessingError } from "../../lib/retryable";
 import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 
-export const OPENROUTER_CLASSIFICATION_MODEL = "google/gemini-3.1-flash-lite-preview";
-export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "openai/gpt-5.4-mini";
+export const OPENROUTER_CLASSIFICATION_MODEL = "deepseek/deepseek-v4-flash-0731";
+export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "qwen/qwen3.6-plus";
 const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
 
 export interface AdClassificationPromptOptions {

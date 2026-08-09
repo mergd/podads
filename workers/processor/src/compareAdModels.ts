@@ -10,10 +10,10 @@ import type { AdSpan, TranscriptResult } from "./lib/types";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODELS = [
-  "google/gemini-3.1-flash-lite-preview",
+  "deepseek/deepseek-v4-flash-0731",
+  "qwen/qwen3.6-plus",
   "google/gemini-3-flash-preview",
-  "openai/gpt-5.4",
-  "qwen/qwen3.6-plus"
+  "openai/gpt-5.4"
 ] as const;
 const OPENING_WINDOW_MS = 2 * 60 * 1000;
 const MAX_REASON_COUNT = 5;
@@ -238,7 +238,7 @@ function usage(): string {
     "  bun run src/compareAdModels.ts --transcript-file /tmp/transcript.json",
     "",
     "Optional flags:",
-    "  --models google/gemini-3.1-flash-lite-preview,google/gemini-3-flash-preview,openai/gpt-5.4,qwen/qwen3.6-plus",
+    "  --models deepseek/deepseek-v4-flash-0731,qwen/qwen3.6-plus,google/gemini-3-flash-preview,openai/gpt-5.4",
     "  --output-file /tmp/podads-model-compare.json"
   ].join("\n");
 }

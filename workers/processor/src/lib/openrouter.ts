@@ -18,6 +18,8 @@ interface OpenRouterResponse {
   usage?: OpenRouterUsage;
   error?: {
     message?: string;
+    code?: number | string;
+    type?: string;
   };
 }
 
@@ -76,6 +78,30 @@ function parseRetryAfterSeconds(headerValue: string | null, body: string): numbe
   return totalSeconds > 0 ? totalSeconds : undefined;
 }
 
+function resolveOpenRouterBodyErrorStatus(error: NonNullable<OpenRouterResponse["error"]>): number {
+  const rawCode = error.code;
+  const numericCode =
+    typeof rawCode === "number"
+      ? rawCode
+      : typeof rawCode === "string"
+        ? Number.parseInt(rawCode, 10)
+        : Number.NaN;
+
+  if (Number.isFinite(numericCode) && numericCode >= 400 && numericCode < 600) {
+    return numericCode;
+  }
+
+  // Providers (e.g. Gemini) often return HTTP 200 with an error body and no useful code.
+  return 500;
+}
+
+function throwOpenRouterPayloadError(error: NonNullable<OpenRouterResponse["error"]>): never {
+  const status = resolveOpenRouterBodyErrorStatus(error);
+  const body = error.message?.trim() || JSON.stringify(error);
+  const retryAfterSeconds = isRetryableOpenRouterStatus(status) ? DEFAULT_RETRY_AFTER_SECONDS : undefined;
+  throw new OpenRouterRequestError(status, body, retryAfterSeconds);
+}
+
 function extractMessageText(message: OpenRouterMessage | undefined): string {
   const content = message?.content;
 
@@ -95,8 +121,8 @@ function extractMessageText(message: OpenRouterMessage | undefined): string {
 }
 
 function extractJsonText(payload: OpenRouterResponse): string {
-  if (payload.error?.message) {
-    throw new Error(`OpenRouter request failed: ${payload.error.message}`);
+  if (payload.error) {
+    throwOpenRouterPayloadError(payload.error);
   }
 
   const text = extractMessageText(payload.choices?.[0]?.message);
@@ -177,6 +203,10 @@ export async function createOpenRouterChatCompletion(
   }
 
   const payload = (await response.json()) as OpenRouterResponse;
+
+  if (payload.error) {
+    throwOpenRouterPayloadError(payload.error);
+  }
 
   return {
     payload,
