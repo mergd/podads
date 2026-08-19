@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Skeleton } from "../components/Skeleton";
@@ -5,6 +6,8 @@ import { useShowsSearch, type ShowSearchItem } from "../contexts/showsSearch";
 import { lastUpdatedLabel } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import styles from "./shows.module.css";
+
+const RESULTS_PAGE_SIZE = 24;
 
 function itemTitle(item: ShowSearchItem): string {
   return item.feed?.title ?? item.itunes?.title ?? "Untitled podcast";
@@ -21,6 +24,37 @@ function itemImage(item: ShowSearchItem): string | null {
 export function ShowsPage() {
   const { items, total, hasLoaded, query, importItem, importingKey } = useShowsSearch();
   const navigate = useNavigate();
+  const [pagination, setPagination] = useState({
+    query,
+    count: RESULTS_PAGE_SIZE,
+  });
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const visibleCount = pagination.query === query ? pagination.count : RESULTS_PAGE_SIZE;
+  const visibleItems = useMemo(() => items.slice(0, visibleCount), [items, visibleCount]);
+  const hasMore = visibleCount < items.length;
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setPagination((current) => ({
+            query,
+            count: Math.min(
+              (current.query === query ? current.count : RESULTS_PAGE_SIZE) + RESULTS_PAGE_SIZE,
+              items.length,
+            ),
+          }));
+        }
+      },
+      { rootMargin: "400px 0px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, items.length, query]);
 
   const handleImport = async (item: ShowSearchItem) => {
     try {
@@ -61,85 +95,88 @@ export function ShowsPage() {
           )}
         </div>
       ) : (
-        <div className={styles.grid}>
-          {items.map((item) => {
-            const title = decodeEntities(itemTitle(item));
-            const author = itemAuthor(item);
-            const image = itemImage(item);
-            const fallbackLetter = title.charAt(0);
+        <>
+          <div className={styles.grid}>
+            {visibleItems.map((item) => {
+              const title = decodeEntities(itemTitle(item));
+              const author = itemAuthor(item);
+              const image = itemImage(item);
+              const fallbackLetter = title.charAt(0);
 
-            const art = (
-              <div
-                className={styles.artWrap}
-                style={item.feed ? { viewTransitionName: `feed-art-${item.feed.slug}` } : undefined}
-              >
-                {image ? (
-                  <img alt="" className={styles.art} loading="lazy" src={image} />
-                ) : (
-                  <div className={styles.artFallback}>{fallbackLetter}</div>
-                )}
-              </div>
-            );
-
-            const info = (
-              <div className={styles.info}>
-                <h3
-                  className={styles.name}
-                  style={item.feed ? { viewTransitionName: `feed-title-${item.feed.slug}` } : undefined}
+              const art = (
+                <div
+                  className={styles.artWrap}
+                  style={item.feed ? { viewTransitionName: `feed-art-${item.feed.slug}` } : undefined}
                 >
-                  {title}
-                </h3>
-                {author ? <div className={styles.author}>{author}</div> : null}
-                <div className={styles.meta}>
-                  {item.feed ? (
-                    <>
-                      <span>
-                        {item.feed.episodeCount} ep{item.feed.episodeCount !== 1 ? "s" : ""}
-                      </span>
-                      {item.feed.latestEpisodePubDate ? (
-                        <span>{lastUpdatedLabel(item.feed.latestEpisodePubDate)}</span>
-                      ) : null}
-                    </>
-                  ) : item.itunes?.trackCount ? (
-                    <span>
-                      {item.itunes.trackCount} ep{item.itunes.trackCount !== 1 ? "s" : ""}
-                    </span>
-                  ) : null}
+                  {image ? (
+                    <img alt="" className={styles.art} loading="lazy" src={image} />
+                  ) : (
+                    <div className={styles.artFallback}>{fallbackLetter}</div>
+                  )}
                 </div>
-              </div>
-            );
+              );
 
-            if (item.feed) {
+              const info = (
+                <div className={styles.info}>
+                  <h3
+                    className={styles.name}
+                    style={item.feed ? { viewTransitionName: `feed-title-${item.feed.slug}` } : undefined}
+                  >
+                    {title}
+                  </h3>
+                  {author ? <div className={styles.author}>{author}</div> : null}
+                  <div className={styles.meta}>
+                    {item.feed ? (
+                      <>
+                        <span>
+                          {item.feed.episodeCount} ep{item.feed.episodeCount !== 1 ? "s" : ""}
+                        </span>
+                        {item.feed.latestEpisodePubDate ? (
+                          <span>{lastUpdatedLabel(item.feed.latestEpisodePubDate)}</span>
+                        ) : null}
+                      </>
+                    ) : item.itunes?.trackCount ? (
+                      <span>
+                        {item.itunes.trackCount} ep{item.itunes.trackCount !== 1 ? "s" : ""}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              );
+
+              if (item.feed) {
+                return (
+                  <Link
+                    className={styles.card}
+                    key={item.key}
+                    state={{ title: item.feed.title, imageUrl: item.feed.imageUrl }}
+                    to={`/${item.feed.slug}`}
+                    viewTransition
+                  >
+                    {art}
+                    {info}
+                  </Link>
+                );
+              }
+
+              const isImporting = importingKey === item.key;
               return (
-                <Link
+                <button
                   className={styles.card}
+                  disabled={isImporting}
                   key={item.key}
-                  state={{ title: item.feed.title, imageUrl: item.feed.imageUrl }}
-                  to={`/${item.feed.slug}`}
-                  viewTransition
+                  onClick={() => void handleImport(item)}
+                  type="button"
                 >
                   {art}
                   {info}
-                </Link>
+                  <span className={styles.importBadge}>{isImporting ? "Importing…" : "Import"}</span>
+                </button>
               );
-            }
-
-            const isImporting = importingKey === item.key;
-            return (
-              <button
-                className={styles.card}
-                disabled={isImporting}
-                key={item.key}
-                onClick={() => void handleImport(item)}
-                type="button"
-              >
-                {art}
-                {info}
-                <span className={styles.importBadge}>{isImporting ? "Importing…" : "Import"}</span>
-              </button>
-            );
-          })}
-        </div>
+            })}
+          </div>
+          {hasMore ? <div aria-hidden className={styles.loadMore} ref={loadMoreRef} /> : null}
+        </>
       )}
     </div>
   );

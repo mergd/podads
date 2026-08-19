@@ -381,6 +381,18 @@ async function markJobSkipped(
     .run();
 }
 
+async function markDuplicateJobComplete(db: D1Database, message: EpisodeJobMessage): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE jobs
+      SET status = 'complete', last_error = NULL, updated_at = ?2
+      WHERE id = ?1`
+    )
+    .bind(message.jobId, now)
+    .run();
+}
+
 async function markJobQueuedForRetry(
   db: D1Database,
   message: EpisodeJobMessage,
@@ -463,6 +475,16 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
 
   if (!episode) {
     throw new Error(`Episode ${message.episodeId} could not be loaded.`);
+  }
+
+  // Queue delivery is at-least-once. A delayed or duplicate message must not
+  // spend money reprocessing an episode that already completed successfully.
+  if (episode.processing_status === "ready") {
+    await markDuplicateJobComplete(env.DB, message);
+    logEpisodeProcessingDiagnostics("info", "episode_processing_duplicate_skipped", episode.id, episode.feed_id, {
+      skippedReason: "already_processed"
+    });
+    return;
   }
 
   const distinctId = `episode:${episode.id}`;

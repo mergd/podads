@@ -1,0 +1,10 @@
+version = 1
+scope = "project"
+
+bundles = []
+
+[var.PODCAST_INDEX_API_KEY]
+visibility = "secret"
+
+[var.PODCAST_INDEX_API_SECRET]
+visibility = "secret"

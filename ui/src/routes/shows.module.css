@@ -65,6 +65,10 @@
   gap: var(--space-4);
 }
 
+.loadMore {
+  height: 1px;
+}
+
 .card {
   display: grid;
   gap: var(--space-2);

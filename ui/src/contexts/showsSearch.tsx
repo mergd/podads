@@ -30,6 +30,7 @@ type ShowsSearchContextValue = {
 };
 
 const ShowsSearchContext = createContext<ShowsSearchContextValue | null>(null);
+const SEARCH_DEBOUNCE_MS = 800;
 
 function itemFromFeed(feed: FeedSummary): ShowSearchItem {
   return { key: `feed:${feed.slug}`, feed, itunes: null };
@@ -49,23 +50,39 @@ export function ShowsSearchProvider({ children }: { children: ReactNode }) {
     const requestId = ++requestIdRef.current;
     setIsLoading(true);
     try {
-      if (q.trim().length === 0) {
-        const result = await fetchFeeds();
+      const trimmedQuery = q.trim();
+
+      if (!trimmedQuery) {
+        const catalogResult = await fetchFeeds();
         if (requestId !== requestIdRef.current) return;
-        setItems(result.feeds.map(itemFromFeed));
-        setTotal(result.total);
-      } else {
-        const result = await searchPodcasts(q);
-        if (requestId !== requestIdRef.current) return;
-        setItems(
-          result.results.map((entry) => ({
-            key: `itunes:${entry.itunes.collectionId}`,
-            feed: entry.feed,
-            itunes: entry.itunes,
-          })),
-        );
-        setTotal(result.results.length);
+        setItems(catalogResult.feeds.map(itemFromFeed));
+        setTotal(catalogResult.total);
+        return;
       }
+
+      const [catalogResult, directoryResult] = await Promise.all([
+        fetchFeeds(trimmedQuery),
+        trimmedQuery.length >= 2
+          ? searchPodcasts(trimmedQuery)
+          : Promise.resolve({ query: trimmedQuery, results: [] }),
+      ]);
+      if (requestId !== requestIdRef.current) return;
+
+      const catalogSlugs = new Set(catalogResult.feeds.map((feed) => feed.slug));
+      const catalogSourceUrls = new Set(catalogResult.feeds.map((feed) => feed.sourceUrl));
+      const directoryItems = directoryResult.results
+        .filter(
+          (entry) =>
+            (!entry.feed || !catalogSlugs.has(entry.feed.slug)) && !catalogSourceUrls.has(entry.itunes.feedUrl),
+        )
+        .map((entry) => ({
+          key: `itunes:${entry.itunes.collectionId}`,
+          feed: entry.feed,
+          itunes: entry.itunes,
+        }));
+
+      setItems([...catalogResult.feeds.map(itemFromFeed), ...directoryItems]);
+      setTotal(catalogResult.total + directoryItems.length);
     } catch {
       // keep existing state on error
     } finally {
@@ -80,7 +97,7 @@ export function ShowsSearchProvider({ children }: { children: ReactNode }) {
     (value: string) => {
       setQueryState(value);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => void load(value), 250);
+      debounceRef.current = setTimeout(() => void load(value), SEARCH_DEBOUNCE_MS);
     },
     [load],
   );

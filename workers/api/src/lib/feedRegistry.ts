@@ -1052,6 +1052,22 @@ export async function getEpisodeById(
   return row ?? null;
 }
 
+export async function hasActiveEpisodeProcessingJob(db: D1Database, episodeId: number): Promise<boolean> {
+  const job = await db
+    .prepare(
+      `SELECT 1 AS active
+      FROM jobs
+      WHERE episode_id = ?1
+        AND kind = 'episode.process'
+        AND status IN ('queued', 'processing')
+      LIMIT 1`
+    )
+    .bind(episodeId)
+    .first<{ active: number }>();
+
+  return job?.active === 1;
+}
+
 export async function resetEpisodeToPending(db: D1Database, episodeId: number): Promise<void> {
   const now = new Date().toISOString();
   await db

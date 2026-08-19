@@ -1,5 +1,5 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type UIEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useShowsSearch, type ShowSearchItem } from "../contexts/showsSearch";
@@ -7,7 +7,7 @@ import { lastUpdatedLabel } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import styles from "./ShowsTopBarSearch.module.css";
 
-const DROPDOWN_MAX = 12;
+const DROPDOWN_PAGE_SIZE = 12;
 
 function itemTitle(item: ShowSearchItem): string {
   return item.feed?.title ?? item.itunes?.title ?? "Untitled podcast";
@@ -27,13 +27,26 @@ export function ShowsTopBarSearch() {
   const isShowsPage = location.pathname === "/shows";
   const { query, setQuery, isLoading, hasLoaded, items, total, importItem, importingKey } = useShowsSearch();
   const [panelOpen, setPanelOpen] = useState(false);
+  const [dropdownPagination, setDropdownPagination] = useState({ query, count: DROPDOWN_PAGE_SIZE });
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
 
   const showOffPagePanel = !isShowsPage && panelOpen;
   const hasQueryTrim = query.trim().length > 0;
-  const dropdownItems = items.slice(0, DROPDOWN_MAX);
+  const dropdownCount = dropdownPagination.query === query ? dropdownPagination.count : DROPDOWN_PAGE_SIZE;
+  const dropdownItems = items.slice(0, dropdownCount);
+
+  const handlePanelScroll = (event: UIEvent<HTMLDivElement>) => {
+    const panel = event.currentTarget;
+    const isNearBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 80;
+    if (!isNearBottom || dropdownCount >= items.length) return;
+
+    setDropdownPagination({
+      query,
+      count: Math.min(dropdownCount + DROPDOWN_PAGE_SIZE, items.length),
+    });
+  };
 
   useEffect(() => {
     const el = rootRef.current;
@@ -110,6 +123,7 @@ export function ShowsTopBarSearch() {
           aria-label="Search results"
           className={styles.panel}
           id={listId}
+          onScroll={handlePanelScroll}
           role="region"
         >
           {!hasQueryTrim ? (
@@ -206,7 +220,7 @@ export function ShowsTopBarSearch() {
               })}
             </ul>
           )}
-          {total > DROPDOWN_MAX && hasQueryTrim ? (
+          {total > DROPDOWN_PAGE_SIZE && hasQueryTrim ? (
             <div className={styles.panelFooter}>
               <Link className={styles.moreLink} to="/shows" viewTransition>
                 See all {total} matches on Shows

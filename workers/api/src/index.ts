@@ -23,13 +23,14 @@ import {
   getFeedDetail,
   getFeedsByNormalizedUrls,
   getHomeData,
+  hasActiveEpisodeProcessingJob,
   listFeeds,
   registerFeed,
   resetEpisodeToPending,
   selectGlobalPendingEpisodesForProcessing
 } from "./lib/feedRegistry";
-import { searchItunesPodcasts } from "./lib/itunesSearch";
 import { normalizeFeedUrl } from "./lib/normalizeFeedUrl";
+import { searchPodcastIndex } from "./lib/podcastIndexSearch";
 import { capturePostHogEvent } from "./lib/posthog";
 import { buildProxiedRssXml } from "./lib/rss";
 
@@ -256,16 +257,14 @@ async function handlePodcastSearch(request: Request, env: Env): Promise<Response
   const query = url.searchParams.get("q")?.trim() ?? "";
   const rawLimit = url.searchParams.get("limit");
   const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
-  const country = url.searchParams.get("country") ?? undefined;
-
   if (!query) {
     const empty: PodcastSearchResponse = { query: "", results: [] };
     return json(empty);
   }
 
   try {
-    const itunesResults = await searchItunesPodcasts(query, { limit, country });
-    const normalizedKeys = itunesResults.map((item) => {
+    const directoryResults = await searchPodcastIndex(query, env, { limit });
+    const normalizedKeys = directoryResults.map((item) => {
       try {
         return normalizeFeedUrl(item.feedUrl);
       } catch {
@@ -274,7 +273,7 @@ async function handlePodcastSearch(request: Request, env: Env): Promise<Response
     });
     const feedsByNormalized = await getFeedsByNormalizedUrls(env.DB, normalizedKeys);
 
-    const results: PodcastSearchItem[] = itunesResults.map((itunes, index) => {
+    const results: PodcastSearchItem[] = directoryResults.map((itunes, index) => {
       const key = normalizedKeys[index] ?? "";
       const match = key ? feedsByNormalized.get(key) ?? null : null;
       return {
@@ -700,6 +699,26 @@ async function handleAdminProcessEpisode(request: Request, env: Env, episodeId: 
     return notFound();
   }
 
+  if (episode.processing_status === "ready") {
+    return json({
+      ok: true,
+      episodeId: episode.id,
+      feedSlug: episode.feed_slug,
+      enqueued: false,
+      reason: "already_processed"
+    });
+  }
+
+  if (episode.processing_status === "processing" || await hasActiveEpisodeProcessingJob(env.DB, episodeId)) {
+    return json({
+      ok: true,
+      episodeId: episode.id,
+      feedSlug: episode.feed_slug,
+      enqueued: false,
+      reason: "already_in_progress"
+    });
+  }
+
   await resetEpisodeToPending(env.DB, episodeId);
 
   const enqueuedAt = new Date().toISOString();
@@ -715,7 +734,7 @@ async function handleAdminProcessEpisode(request: Request, env: Env, episodeId: 
 
   await enqueueEpisodeJobs(env.DB, env.PROCESSING_QUEUE, [message]);
 
-  return json({ ok: true, episodeId: episode.id, feedSlug: episode.feed_slug });
+  return json({ ok: true, episodeId: episode.id, feedSlug: episode.feed_slug, enqueued: true });
 }
 
 function parseAdminProcessEpisodeRoute(pathname: string): number | null {

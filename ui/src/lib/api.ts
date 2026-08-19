@@ -35,8 +35,8 @@ export async function fetchFeeds(query?: string): Promise<FeedsListResponse> {
 }
 
 export async function searchPodcasts(query: string): Promise<PodcastSearchResponse> {
-  const params = `?q=${encodeURIComponent(query)}`;
-  const response = await fetch(`${API_BASE_URL}/api/search/podcasts${params}`);
+  const params = new URLSearchParams({ q: query, limit: "200" });
+  const response = await fetch(`${API_BASE_URL}/api/search/podcasts?${params.toString()}`);
   return parseJson<PodcastSearchResponse>(response);
 }
 
