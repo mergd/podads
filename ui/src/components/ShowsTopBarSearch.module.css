@@ -241,8 +241,14 @@
 
 @media (max-width: 720px) {
   .wrap {
-    flex: 1 1 100%;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
     max-width: none;
     margin-left: 0;
+  }
+
+  .search {
+    font-size: 16px;
   }
 }

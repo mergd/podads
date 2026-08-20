@@ -51,13 +51,18 @@ export function ShowsTopBarSearch() {
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const onFocusOut = (e: FocusEvent) => {
-      const next = e.relatedTarget;
-      if (next && el.contains(next as Node)) return;
+
+    const closeWhenOutside = (event: PointerEvent | FocusEvent) => {
+      if (event.target instanceof Node && el.contains(event.target)) return;
       setPanelOpen(false);
     };
-    el.addEventListener("focusout", onFocusOut);
-    return () => el.removeEventListener("focusout", onFocusOut);
+
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("focusin", closeWhenOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("focusin", closeWhenOutside);
+    };
   }, []);
 
   useEffect(() => {

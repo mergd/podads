@@ -84,4 +84,19 @@
   .main {
     width: min(var(--layout-max), 100% - 2 * var(--space-4));
   }
+
+  .headerInner {
+    grid-template-columns: 1fr auto;
+    display: grid;
+  }
+
+  .brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .nav {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
