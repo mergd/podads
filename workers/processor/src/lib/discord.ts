@@ -1,6 +1,9 @@
+import { summarizeProcessingError } from "@podads/shared";
+
 import type { EpisodeJobMessage, EpisodeRecord } from "./types";
 
 const DISCORD_ERROR_FIELD_LIMIT = 1000;
+const DEFAULT_UI_BASE_URL = "https://podads.yet-to-be.com";
 
 function truncateFieldValue(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 3)}...`;
@@ -23,6 +26,14 @@ function formatEpisodeLabel(episode: EpisodeRecord | null, fallbackEpisodeId: nu
   return parts.join(" | ");
 }
 
+function formatEpisodePageUrl(episode: EpisodeRecord | null, fallbackEpisodeId: number): string | null {
+  if (!episode?.feed_slug) {
+    return null;
+  }
+
+  return `${DEFAULT_UI_BASE_URL}/${episode.feed_slug}/episodes/${fallbackEpisodeId}`;
+}
+
 export async function notifyEpisodeProcessingFailure(
   env: Env,
   message: EpisodeJobMessage,
@@ -34,6 +45,7 @@ export async function notifyEpisodeProcessingFailure(
   }
 
   try {
+    const episodePageUrl = formatEpisodePageUrl(episode, message.episodeId);
     const response = await fetch(env.DISCORD_PROCESSING_FAILURE_WEBHOOK_URL, {
       method: "POST",
       headers: {
@@ -54,6 +66,14 @@ export async function notifyEpisodeProcessingFailure(
                 name: "Episode",
                 value: formatEpisodeLabel(episode, message.episodeId)
               },
+              ...(episodePageUrl
+                ? [
+                    {
+                      name: "Episode page",
+                      value: episodePageUrl
+                    }
+                  ]
+                : []),
               {
                 name: "Processing version",
                 value: `\`${message.processingVersion}\``,
@@ -66,7 +86,7 @@ export async function notifyEpisodeProcessingFailure(
               },
               {
                 name: "Reason",
-                value: truncateFieldValue(errorMessage, DISCORD_ERROR_FIELD_LIMIT)
+                value: truncateFieldValue(summarizeProcessingError(errorMessage), DISCORD_ERROR_FIELD_LIMIT)
               }
             ],
             timestamp: new Date().toISOString()

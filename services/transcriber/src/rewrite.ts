@@ -182,6 +182,7 @@ async function rewriteMp3WithFfmpeg(
         "-i", inputPath,
         "-vn",
         "-map", "0:a:0",
+        "-map_metadata", "-1",
         "-af", buildAselectFilter(removedRanges),
         "-codec:a", "libmp3lame",
         "-b:a", OUTPUT_BITRATE,

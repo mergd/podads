@@ -1,3 +1,5 @@
+import { summarizeProcessingError } from "@podads/shared";
+
 import type { EpisodeRecord, TranscriptResult, TranscriptSegment } from "../../lib/types";
 import { RetryableProcessingError } from "../../lib/retryable";
 import { transcriberFetch } from "../../transcriberContainer";
@@ -116,20 +118,21 @@ async function fetchGateway(
     }
 
     const text = await response.text();
+    const gatewayError = `Transcription gateway failed (${response.status}): ${summarizeProcessingError(text)}`;
 
     if (response.status === 429) {
       throw new RetryableProcessingError(
-        `Transcription gateway failed (${response.status}): ${text}`,
+        gatewayError,
         parseRetryAfterSeconds(response.headers.get("retry-after"), text) ?? DEFAULT_RETRY_DELAY_SECONDS
       );
     }
 
     if (!isRetryableGatewayFailure(response.status, text)) {
-      throw new Error(`Transcription gateway failed (${response.status}): ${text}`);
+      throw new Error(gatewayError);
     }
 
     throw new RetryableProcessingError(
-      `Transcription gateway failed (${response.status}): ${text}`,
+      gatewayError,
       DEFAULT_RETRY_DELAY_SECONDS
     );
   } catch (error) {

@@ -19,6 +19,7 @@ import {
 } from "./groq.js";
 import { MistralRetryableError, transcribeWithMistral } from "./mistral.js";
 import {
+  AudioPrepareError,
   AudioPrepareTimeoutError,
   cleanupFile,
   getFileSizeBytes,
@@ -196,6 +197,16 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         return reply.status(503).send({
           error: error.message,
           retry_after_seconds: retryAfterSeconds
+        });
+      }
+
+      if (error instanceof AudioPrepareError) {
+        return reply.status(500).send({
+          error: error.message,
+          stage: "audio_prepare",
+          ffmpeg_exit_code: error.exitCode,
+          last_output_time: error.lastOutputTime,
+          summary: error.summary
         });
       }
 

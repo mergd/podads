@@ -1,4 +1,5 @@
 import type { EpisodeProcessingDiagnostics, EpisodeProcessingStatus, EpisodeProcessingSubstatus } from "@podads/shared/api";
+import { summarizeProcessingError } from "@podads/shared";
 
 const SUBSTATUS_LABELS: Record<EpisodeProcessingSubstatus, string> = {
   queued: "Queued",
@@ -105,4 +106,15 @@ export function getEpisodeTimeSavedLabel(
   }
 
   return processingStatus === "ready" ? "Saved 0s" : null;
+}
+
+export function getEpisodeFailureSummary(
+  processingStatus: EpisodeProcessingStatus,
+  lastError: string | null
+): string | null {
+  if (processingStatus !== "failed" || !lastError) {
+    return null;
+  }
+
+  return summarizeProcessingError(lastError);
 }

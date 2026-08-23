@@ -25,6 +25,27 @@ export class AudioPrepareTimeoutError extends Error {
   }
 }
 
+export class AudioPrepareError extends Error {
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | number | null;
+  readonly lastOutputTime: string | null;
+  readonly summary: string;
+
+  constructor(input: {
+    exitCode: number | null;
+    signal: NodeJS.Signals | number | null;
+    lastOutputTime: string | null;
+    summary: string;
+  }) {
+    super(`Audio prepare failed: ${input.summary}`);
+    this.name = "AudioPrepareError";
+    this.exitCode = input.exitCode;
+    this.signal = input.signal;
+    this.lastOutputTime = input.lastOutputTime;
+    this.summary = input.summary;
+  }
+}
+
 export async function getFileSizeBytes(path: string): Promise<number> {
   return (await stat(path)).size;
 }
@@ -41,23 +62,48 @@ function stderrText(error: ExecFileException): string {
   return "";
 }
 
+function extractLastOutputTime(text: string): string | null {
+  const matches = [...text.matchAll(/\btime=(\d{2}:\d{2}:\d{2}\.\d+)/g)];
+  return matches.at(-1)?.[1] ?? null;
+}
+
 function summarizeFfmpegFailure(error: ExecFileException): string {
-  const meaningful = stderrText(error)
-    .split(/\r?\n/)
-    .map((line: string) => line.replace(/\r/g, "").trim())
+  const stderr = stderrText(error);
+  const lastOutputTime = extractLastOutputTime(stderr);
+  const meaningful = stderr
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line: string) => line.trim())
     .filter((line: string) => line.length > 0)
     .filter((line: string) => !/^size=\s*\d/i.test(line))
     .filter((line: string) => !/^ffmpeg version/i.test(line))
     .filter((line: string) => !/^built with/i.test(line))
     .filter((line: string) => !/^configuration:/i.test(line))
     .filter((line: string) => !/^lib(av|sw)/i.test(line))
-    .slice(-8);
+    .filter((line: string) => !/^(?:lyrics-|title\s*:|album\s*:|genre\s*:|date\s*:)/i.test(line))
+    .filter((line: string) => !/^:?\s*</.test(line) && !/<\/(?:p|a|br)>/i.test(line))
+    .filter((line: string) => /error|failed|invalid|cannot|unable|no such|permission|conversion|disk|killed|timeout/i.test(line))
+    .slice(-4);
 
-  if (meaningful.length > 0) {
-    return meaningful.join(" | ");
+  const parts: string[] = [];
+  if (typeof error.code === "number") {
+    parts.push(`ffmpeg exit ${error.code}`);
+  } else if (error.signal) {
+    parts.push(`ffmpeg signal ${error.signal}`);
   }
 
-  return error.message;
+  if (lastOutputTime) {
+    parts.push(`last output time ${lastOutputTime}`);
+  }
+
+  if (meaningful.length > 0) {
+    parts.push(meaningful.join(" | "));
+  } else {
+    parts.push("no ffmpeg error line; encode likely failed while writing the output file");
+  }
+
+  return parts.join(". ");
 }
 
 export async function prepareAudioForTranscription(
@@ -68,13 +114,21 @@ export async function prepareAudioForTranscription(
   const outputPath = join(tmpdir(), `prepared-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
   const ffmpegArgs = [
     "-y",
-    "-i", inputPath,
-    "-vn",
+    "-hide_banner",
   ];
 
   if (analysisWindowMs !== null) {
     ffmpegArgs.push("-t", String(analysisWindowMs / 1000));
   }
+
+  ffmpegArgs.push(
+    "-i", inputPath,
+    "-map", "0:a:0",
+    "-map_metadata", "-1",
+    "-vn",
+    "-sn",
+    "-dn",
+  );
 
   if (multiplier > 1) {
     ffmpegArgs.push("-filter:a", `atempo=${multiplier}`);
@@ -95,7 +149,12 @@ export async function prepareAudioForTranscription(
       throw new AudioPrepareTimeoutError(PREPARE_TIMEOUT_MS);
     }
 
-    throw new Error(`Audio prepare failed: ${summarizeFfmpegFailure(execError)}`);
+    throw new AudioPrepareError({
+      exitCode: typeof execError.code === "number" ? execError.code : null,
+      signal: execError.signal ?? null,
+      lastOutputTime: extractLastOutputTime(stderrText(execError)),
+      summary: summarizeFfmpegFailure(execError)
+    });
   }
 
   return outputPath;

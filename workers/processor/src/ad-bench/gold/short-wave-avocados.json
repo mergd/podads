@@ -1,0 +1,8 @@
+{
+  "caseId": "short-wave-avocados",
+  "spans": [
+    { "startMs": 0, "endMs": 13500, "label": "preroll Capital One" },
+    { "startMs": 96100, "endMs": 189300, "label": "midroll Schwab / BetterHelp" },
+    { "startMs": 657100, "endMs": 715100, "label": "postroll Capella / Amazon Health" }
+  ]
+}

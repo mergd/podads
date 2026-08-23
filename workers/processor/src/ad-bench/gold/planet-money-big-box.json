@@ -1,0 +1,9 @@
+{
+  "caseId": "planet-money-big-box",
+  "spans": [
+    { "startMs": 0, "endMs": 20100, "label": "preroll Amazon Business" },
+    { "startMs": 304500, "endMs": 353700, "label": "mid1 Capital One / Schwab" },
+    { "startMs": 1563800, "endMs": 1623000, "label": "mid2 Capital One / Schwab / Instacart" },
+    { "startMs": 2431400, "endMs": 2482600, "label": "postroll Amazon / Capital One / Schwab" }
+  ]
+}

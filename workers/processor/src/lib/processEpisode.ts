@@ -1,4 +1,5 @@
 import type { EpisodeProcessingSubstatus } from "@podads/shared/api";
+import { summarizeProcessingError } from "@podads/shared";
 import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 
 import { detectAdSpans } from "./adDetection";
@@ -785,7 +786,9 @@ export async function handleEpisodeJob(env: Env, message: EpisodeJobMessage): Pr
     await processEpisodeJob(env, message);
     return { kind: "ack" };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown episode processing failure";
+    const errorMessage = summarizeProcessingError(
+      error instanceof Error ? error.message : "Unknown episode processing failure"
+    );
     const now = new Date().toISOString();
     const processingAttemptCount = Math.max(1, (message.pollAttempt ?? 0) + 1);
     const retryableError = isRetryableProcessingError(error);

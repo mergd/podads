@@ -14,6 +14,7 @@ import type {
   RegisterFeedResponse,
   SourceFeed
 } from "./types";
+import { summarizeProcessingError } from "@podads/shared";
 import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 import { hashNormalizedUrl, normalizeFeedUrl, slugFromHash } from "./normalizeFeedUrl";
 
@@ -347,7 +348,7 @@ function buildEpisodeSummary(
     processingStatus: row.processing_status,
     processingSubstatus: normalizeProcessingSubstatus(processingDetails.processingSubstatus),
     processingDiagnostics,
-    lastError: row.last_error,
+    lastError: row.last_error ? summarizeProcessingError(row.last_error) : null,
     reportUrl: `${uiBaseUrl}/report?feed=${encodeURIComponent(row.feed_slug)}&episode=${row.id}`
   };
 }

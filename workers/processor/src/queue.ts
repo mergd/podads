@@ -1,3 +1,4 @@
+import { summarizeProcessingError } from "@podads/shared";
 import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 
 import { expireOldCleanedAudio } from "./lib/audioRetention";
@@ -24,7 +25,9 @@ async function dispatchMessage(env: Env, message: EpisodeJobMessage): Promise<Ep
 
 async function markUnhandledQueueFailure(env: Env, message: EpisodeJobMessage, error: unknown): Promise<void> {
   const now = new Date().toISOString();
-  const errorMessage = error instanceof Error ? error.message : "Unknown unhandled queue failure";
+  const errorMessage = summarizeProcessingError(
+    error instanceof Error ? error.message : "Unknown unhandled queue failure"
+  );
   const processingAttemptCount = Math.max(1, (message.pollAttempt ?? 0) + 1);
   const processingDetailsJson = JSON.stringify({
     processingSubstatus: null,

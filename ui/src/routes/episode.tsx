@@ -8,7 +8,7 @@ import { fetchEpisodeTranscript, fetchFeed } from "../lib/api";
 import { formatEpisodeDuration, isNewContent, shortDate } from "../lib/dates";
 import { decodeEntities } from "../lib/entities";
 import { captureUiEvent } from "../lib/posthog";
-import { getEpisodeAudioStateCopy, getEpisodeStatusLabel, getEpisodeTimeSavedLabel } from "../lib/processing";
+import { getEpisodeAudioStateCopy, getEpisodeFailureSummary, getEpisodeStatusLabel, getEpisodeTimeSavedLabel } from "../lib/processing";
 import type { EpisodeSummary, EpisodeTranscriptResponse, FeedDetailResponse } from "@podads/shared/api";
 import styles from "./episode.module.css";
 
@@ -228,6 +228,7 @@ export function EpisodePage() {
     episode.processingDiagnostics,
     hasAdFreeAudio
   );
+  const failureSummary = getEpisodeFailureSummary(episode.processingStatus, episode.lastError);
 
   return (
     <div className={styles.page}>
@@ -280,6 +281,7 @@ export function EpisodePage() {
           <div className={styles.audioState} data-ready={hasAdFreeAudio}>
             {getEpisodeAudioStateCopy(episode.processingStatus, episode.processingSubstatus, hasAdFreeAudio)}
           </div>
+          {failureSummary ? <p className={styles.failureReason}>{failureSummary}</p> : null}
           {timeSavedLabel ? (
             <div
               className={styles.timeSaved}
