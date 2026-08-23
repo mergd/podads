@@ -1,0 +1,10 @@
+{
+  "caseId": "jasmine-sun",
+  "spans": [
+    { "startMs": 0, "endMs": 105800, "label": "preroll IB / IBM / Optum" },
+    { "startMs": 109480, "endMs": 149800, "label": "live show ticket promo" },
+    { "startMs": 879600, "endMs": 1012670, "label": "mid1 IB / ChatGPT / 4imprint" },
+    { "startMs": 2104060, "endMs": 2252940, "label": "mid2 ChatGPT / 4imprint / Optum" },
+    { "startMs": 3492160, "endMs": 3597120, "label": "postroll ChatGPT / Hartford / 4imprint" }
+  ]
+}

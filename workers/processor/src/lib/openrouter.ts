@@ -16,6 +16,7 @@ interface OpenRouterChoice {
 interface OpenRouterResponse {
   choices?: OpenRouterChoice[];
   usage?: OpenRouterUsage;
+  provider?: string;
   error?: {
     message?: string;
     code?: number | string;
@@ -43,6 +44,7 @@ export interface OpenRouterMetrics {
   completionTokens?: number;
   totalTokens?: number;
   requestDurationMs: number;
+  routedProvider?: string;
 }
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -155,7 +157,8 @@ export function getOpenRouterMetrics(payload: OpenRouterResponse, requestDuratio
     promptTokens: usage?.prompt_tokens,
     completionTokens: usage?.completion_tokens,
     totalTokens: usage?.total_tokens,
-    requestDurationMs
+    requestDurationMs,
+    routedProvider: payload.provider
   };
 }
 
@@ -190,7 +193,8 @@ export async function createOpenRouterChatCompletion(
       "HTTP-Referer": getAppReferer(env),
       "X-Title": "PodAds"
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180_000)
   });
   const requestDurationMs = Date.now() - startedAt;
 

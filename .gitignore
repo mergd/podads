@@ -20,3 +20,6 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# ad-bench transcript cache
+ad-bench/.cache/

@@ -50,6 +50,7 @@ export interface AdDetectionResult {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  routedProvider?: string;
 }
 
 export interface AudioRewriteResult {

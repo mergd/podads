@@ -1,0 +1,27 @@
+{
+  "name": "@podads/ad-bench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "bench": "bun run src/run.ts",
+    "dev": "vite --config site/vite.config.ts",
+    "build": "vite build --config site/vite.config.ts",
+    "preview": "vite preview --config site/vite.config.ts",
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p site/tsconfig.json"
+  },
+  "dependencies": {
+    "@tanstack/charts": "^0.14.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.4"
+  }
+}

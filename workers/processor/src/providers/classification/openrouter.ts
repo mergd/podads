@@ -7,8 +7,8 @@ import {
 import { RetryableProcessingError } from "../../lib/retryable";
 import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 
-export const OPENROUTER_CLASSIFICATION_MODEL = "deepseek/deepseek-v4-flash-0731";
-export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "qwen/qwen3.6-plus";
+export const OPENROUTER_CLASSIFICATION_MODEL = "openai/gpt-5.6-luna";
+export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "google/gemini-3.1-flash-lite";
 const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
 
 export interface AdClassificationPromptOptions {
@@ -20,6 +20,8 @@ interface OpenRouterClassificationPayload {
   spans: Array<{
     startIdx: number;
     endIdx: number;
+    startOffset: number;
+    endOffset: number;
     confidence: number;
     reason: string;
   }>;
@@ -27,6 +29,21 @@ interface OpenRouterClassificationPayload {
 
 function sanitizeSegmentText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function clampUnitInterval(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function msAtSegmentOffset(
+  segment: TranscriptResult["segments"][number],
+  offset: number
+): number {
+  return segment.startMs + (segment.endMs - segment.startMs) * offset;
 }
 
 function formatSeconds(ms: number): string {
@@ -66,7 +83,12 @@ export function buildAdClassificationPrompt(
     "Identify paid advertising spans in this podcast transcript.",
     "Return JSON only.",
     "Segments are provided as TSV lines: `index<TAB>startSec<TAB>endSec<TAB>text`. Times are in seconds.",
-    "For each ad span, return the inclusive `startIdx` and `endIdx` referring to those segment indices.",
+    "For each ad span, return inclusive `startIdx` and `endIdx` plus `startOffset` and `endOffset` in the range 0 to 1.",
+    "`startOffset` is how far into the start segment the ad begins. `endOffset` is how far into the end segment the ad ends.",
+    "If a segment is entirely an ad, use startOffset 0 and/or endOffset 1.",
+    "Whisper often glues the last interview clause and the first ad clause onto one line. Do not take that whole line.",
+    "Estimate the split from the words: if the first 3 of 7 words are still editorial, startOffset is 3/7.",
+    "When the line has a sentence boundary, pause, or music-bed cue, land the offset there rather than at 0 or 1.",
     "Only include host-read ads, sponsorship reads, promo codes, partner messaging, or explicit product promotions.",
     "Do not include editorial chatter, intro, outro, or self-referential jokes unless clearly promotional.",
     "When an ad pod is concentrated in one block, prefer the net start and net end of the whole promotional block rather than splitting it into evenly spaced micro-spans.",
@@ -101,9 +123,12 @@ function normalizeOpenRouterSpans(
         return null;
       }
 
+      const startOffset = clampUnitInterval(span.startOffset, 0);
+      const endOffset = clampUnitInterval(span.endOffset, 1);
+
       return {
-        startMs: Math.max(0, Math.round(startSegment.startMs)),
-        endMs: Math.max(0, Math.round(endSegment.endMs)),
+        startMs: Math.max(0, Math.round(msAtSegmentOffset(startSegment, startOffset))),
+        endMs: Math.max(0, Math.round(msAtSegmentOffset(endSegment, endOffset))),
         confidence:
           typeof span.confidence === "number" && Number.isFinite(span.confidence)
             ? Math.max(0, Math.min(1, span.confidence))
@@ -114,14 +139,27 @@ function normalizeOpenRouterSpans(
     .filter((span): span is AdDetectionResult["spans"][number] => span !== null && span.endMs > span.startMs);
 }
 
+function providerRoutingForModel(model: string): Record<string, unknown> | undefined {
+  if (model.startsWith("deepseek/")) {
+    return {
+      only: ["baseten"],
+      allow_fallbacks: false
+    };
+  }
+
+  return undefined;
+}
+
 export async function runOpenRouterClassificationModel(
   env: Env,
   model: string,
   transcript: TranscriptResult,
   options: AdClassificationPromptOptions = {}
 ): Promise<AdDetectionResult> {
+  const provider = providerRoutingForModel(model);
   const { payload, metrics } = await createOpenRouterChatCompletion(env, {
     model,
+    ...(provider ? { provider } : {}),
     temperature: 0.1,
     response_format: {
       type: "json_schema",
@@ -138,13 +176,19 @@ export async function runOpenRouterClassificationModel(
               items: {
                 type: "object",
                 additionalProperties: false,
-                required: ["startIdx", "endIdx", "confidence", "reason"],
+                required: ["startIdx", "endIdx", "startOffset", "endOffset", "confidence", "reason"],
                 properties: {
                   startIdx: {
                     type: "integer"
                   },
                   endIdx: {
                     type: "integer"
+                  },
+                  startOffset: {
+                    type: "number"
+                  },
+                  endOffset: {
+                    type: "number"
                   },
                   confidence: {
                     type: "number"
@@ -177,7 +221,8 @@ export async function runOpenRouterClassificationModel(
     requestDurationMs: metrics.requestDurationMs,
     promptTokens: metrics.promptTokens,
     completionTokens: metrics.completionTokens,
-    totalTokens: metrics.totalTokens
+    totalTokens: metrics.totalTokens,
+    routedProvider: metrics.routedProvider
   };
 }
 

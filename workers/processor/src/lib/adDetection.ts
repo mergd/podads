@@ -15,9 +15,19 @@ type ClassificationProvider = "mock" | "openrouter";
 const DEFAULT_AD_SPAN_MAX_DURATION_MS = 6 * 60 * 1000;
 const LEX_FRIDMAN_AD_SPAN_MAX_DURATION_MS = 12 * 60 * 1000;
 const SNAP_WINDOW_MS = 5_000;
+const MIN_SILENCE_GAP_MS = 80;
+const INTERIOR_SNAP_GUARD_MS = 400;
 const SEGMENT_EXPANSION_GAP_MS = 2_500;
 const MAX_EDGE_EXPANSION_SEGMENTS = 3;
 const MAX_EDGE_SEGMENT_DURATION_MS = 8_000;
+const DISCLAIMER_SIGNAL_PATTERNS = [
+  /\brestrictions apply\b/i,
+  /\bterms apply\b/i,
+  /\bmember (?:nyse|sipc)\b/i,
+  /\bdoes not verify\b/i,
+  /\binvest(?:ing)? involves risk\b/i,
+  /\bpast performance\b/i
+] as const;
 const PROMOTIONAL_SIGNAL_PATTERNS = [
   /\bsupport(?:ed)? by\b/i,
   /\bsponsor(?:ed|ship)?\b/i,
@@ -62,9 +72,59 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled classification provider: ${value}`);
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function distanceToRange(target: number, startMs: number, endMs: number): number {
+  if (target >= startMs && target <= endMs) {
+    return 0;
+  }
+
+  return target < startMs ? startMs - target : target - endMs;
+}
+
 function snapToNearestGap(target: number, transcript: TranscriptResult, mode: "start" | "end"): number {
-  const nearbySegments = transcript.segments.filter((segment) => Math.abs(segment.startMs - target) <= SNAP_WINDOW_MS);
-  const candidates = nearbySegments.map((segment) => (mode === "start" ? segment.startMs : segment.endMs));
+  const candidates: number[] = [];
+
+  for (let index = 1; index < transcript.segments.length; index += 1) {
+    const previous = transcript.segments[index - 1];
+    const next = transcript.segments[index];
+    if (!previous || !next) {
+      continue;
+    }
+
+    const gapStartMs = previous.endMs;
+    const gapEndMs = next.startMs;
+    if (gapEndMs - gapStartMs < MIN_SILENCE_GAP_MS) {
+      continue;
+    }
+
+    if (distanceToRange(target, gapStartMs, gapEndMs) > SNAP_WINDOW_MS) {
+      continue;
+    }
+
+    candidates.push(clampNumber(target, gapStartMs, gapEndMs));
+  }
+
+  for (const segment of transcript.segments) {
+    if (mode === "start") {
+      const isInterior = target > segment.startMs + INTERIOR_SNAP_GUARD_MS && target < segment.endMs;
+      if (isInterior || Math.abs(segment.startMs - target) > SNAP_WINDOW_MS) {
+        continue;
+      }
+
+      candidates.push(segment.startMs);
+      continue;
+    }
+
+    const isInterior = target < segment.endMs - INTERIOR_SNAP_GUARD_MS && target > segment.startMs;
+    if (isInterior || Math.abs(segment.endMs - target) > SNAP_WINDOW_MS) {
+      continue;
+    }
+
+    candidates.push(segment.endMs);
+  }
 
   if (candidates.length === 0) {
     return target;
@@ -100,6 +160,11 @@ function isPromotionalSegment(text: string): boolean {
   return PROMOTIONAL_SIGNAL_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+function isDisclaimerSegment(text: string): boolean {
+  const normalized = normalizeText(text);
+  return DISCLAIMER_SIGNAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 function isEditorialStopSegment(text: string): boolean {
   const normalized = normalizeText(text);
   return EDITORIAL_STOP_PATTERNS.some((pattern) => pattern.test(normalized));
@@ -107,8 +172,7 @@ function isEditorialStopSegment(text: string): boolean {
 
 function shouldExpandIntoSegment(
   segment: TranscriptSegment,
-  anchorSegment: TranscriptSegment,
-  expansionCount: number
+  anchorSegment: TranscriptSegment
 ): boolean {
   const gapFromAnchorMs = Math.abs(anchorSegment.startMs - segment.endMs);
   const durationMs = segment.endMs - segment.startMs;
@@ -121,7 +185,7 @@ function shouldExpandIntoSegment(
     return false;
   }
 
-  return isPromotionalSegment(segment.text) || expansionCount < 2;
+  return isPromotionalSegment(segment.text) || isDisclaimerSegment(segment.text);
 }
 
 function expandSpanEdges(span: AdSpan, transcript: TranscriptResult): AdSpan {
@@ -147,7 +211,7 @@ function expandSpanEdges(span: AdSpan, transcript: TranscriptResult): AdSpan {
       break;
     }
 
-    if (!shouldExpandIntoSegment(previousSegment, currentSegment, expanded)) {
+    if (!shouldExpandIntoSegment(previousSegment, currentSegment)) {
       break;
     }
 
@@ -174,7 +238,7 @@ function expandSpanEdges(span: AdSpan, transcript: TranscriptResult): AdSpan {
       break;
     }
 
-    if (!isPromotionalSegment(nextSegment.text) && expanded >= 1) {
+    if (!isPromotionalSegment(nextSegment.text) && !isDisclaimerSegment(nextSegment.text)) {
       break;
     }
 
@@ -183,8 +247,14 @@ function expandSpanEdges(span: AdSpan, transcript: TranscriptResult): AdSpan {
 
   return {
     ...span,
-    startMs: transcript.segments[startIndex]?.startMs ?? span.startMs,
-    endMs: transcript.segments[endIndex]?.endMs ?? span.endMs
+    startMs:
+      startIndex === firstOverlapIndex
+        ? span.startMs
+        : (transcript.segments[startIndex]?.startMs ?? span.startMs),
+    endMs:
+      endIndex === lastOverlapIndex
+        ? span.endMs
+        : (transcript.segments[endIndex]?.endMs ?? span.endMs)
   };
 }
 
@@ -273,6 +343,14 @@ export async function detectAdSpans(
 
   return {
     ...result,
-    spans: capSpanDurations(refineSpanBoundaries(result.spans, transcript), maxSpanDurationMs)
+    spans: refineAdSpans(result.spans, transcript, maxSpanDurationMs)
   };
+}
+
+export function refineAdSpans(
+  spans: AdSpan[],
+  transcript: TranscriptResult,
+  maxDurationMs: number = DEFAULT_AD_SPAN_MAX_DURATION_MS
+): AdSpan[] {
+  return capSpanDurations(refineSpanBoundaries(spans, transcript), maxDurationMs);
 }

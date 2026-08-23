@@ -1,0 +1,152 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f5f2;
+  --text: #161616;
+  --mute: #6a6a6a;
+  --line: #ddd9d0;
+  --pass: #1a7f4b;
+  --fail: #c43c3c;
+  --mix: #9a5b00;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+}
+
+header {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.mark {
+  flex: 0 0 auto;
+  width: 148px;
+  height: 148px;
+  display: block;
+}
+
+header h1,
+section h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+header h1 {
+  font-size: 20px;
+}
+
+header p,
+.status,
+.meta {
+  margin: 0 0 12px;
+  max-width: 42rem;
+}
+
+.rule,
+.status,
+.meta {
+  color: var(--mute);
+}
+
+section {
+  margin-top: 36px;
+}
+
+.chart-host {
+  color: var(--text);
+  width: 100%;
+  --ts-chart-1: var(--text);
+  --ts-chart-2: var(--fail);
+  --ts-chart-tooltip-background: #fff;
+  --ts-chart-tooltip-color: var(--text);
+  --ts-chart-tooltip-border: 1px solid var(--line);
+  --ts-chart-tooltip-border-radius: 0;
+  --ts-chart-tooltip-shadow: none;
+  --ts-chart-tooltip-font: 12px ui-sans-serif, system-ui, sans-serif;
+}
+
+.grid-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th:not(:first-child),
+td {
+  text-align: right;
+}
+
+th:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+
+.cases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cases li {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.cases strong {
+  font-weight: 600;
+}
+
+.cases span {
+  color: var(--mute);
+}
+
+@media (max-width: 640px) {
+  header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cases li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

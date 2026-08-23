@@ -1,0 +1,6 @@
+{
+  "caseId": "lex-ffmpeg",
+  "spans": [
+    { "startMs": 180000, "endMs": 627400, "label": "opening host-read sponsor stack" }
+  ]
+}
