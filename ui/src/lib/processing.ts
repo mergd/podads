@@ -1,5 +1,5 @@
 import type { EpisodeProcessingDiagnostics, EpisodeProcessingStatus, EpisodeProcessingSubstatus } from "@podads/shared/api";
-import { summarizeProcessingError } from "@podads/shared";
+import { summarizeProcessingError } from "@podads/shared/errors";
 
 const SUBSTATUS_LABELS: Record<EpisodeProcessingSubstatus, string> = {
   queued: "Queued",

@@ -14,7 +14,7 @@ import type {
   RegisterFeedResponse,
   SourceFeed
 } from "./types";
-import { summarizeProcessingError } from "@podads/shared";
+import { summarizeProcessingError } from "@podads/shared/errors";
 import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue";
 import { hashNormalizedUrl, normalizeFeedUrl, slugFromHash } from "./normalizeFeedUrl";
 
