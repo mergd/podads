@@ -7,7 +7,7 @@ import { getNextRetryAttempt, getRetryDelaySeconds, stampRetryMessage } from "./
 import { recoverStaleEpisodeJobs } from "./lib/staleJobs";
 import type { EpisodeJobMessage } from "./lib/types";
 
-export { TranscriberContainer } from "./transcriberContainer";
+export { LargeTranscriberContainer, TranscriberContainer } from "./transcriberContainer";
 import { transcriberFetch } from "./transcriberContainer";
 
 function assertNever(value: never): never {
@@ -62,7 +62,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/transcriber-health") {
-      const response = await transcriberFetch(env, "/health", { method: "GET" });
+      const response = await transcriberFetch(env, "/health", { method: "GET" }, "basic");
       return new Response(response.body, { status: response.status });
     }
 

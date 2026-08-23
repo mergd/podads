@@ -7,6 +7,7 @@ import {
 
 import { RetryableProcessingError } from "./retryable";
 import { transcriberFetch } from "../transcriberContainer";
+import type { TranscriberTier } from "./containerSizing";
 import type { AdSpan, AudioRewriteManifest, AudioRewriteResult } from "./types";
 
 // Must cover download + full-episode ffmpeg rewrite (up to ~15m on small containers).
@@ -104,7 +105,7 @@ function createPassthroughResult(contentType: string, adSpans: AdSpan[], note: s
   };
 }
 
-async function fetchRewriteFromGateway(env: Env, path: string, body: string): Promise<Response> {
+async function fetchRewriteFromGateway(env: Env, path: string, body: string, tier: TranscriberTier): Promise<Response> {
   try {
     const response = await transcriberFetch(env, path, {
       method: "POST",
@@ -113,7 +114,7 @@ async function fetchRewriteFromGateway(env: Env, path: string, body: string): Pr
       },
       body,
       signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
-    });
+    }, tier);
 
     if (response.ok) {
       return response;
@@ -158,7 +159,8 @@ async function rewriteAudioViaGateway(
   sourceContentType: string | null,
   key: string,
   processingVersion: string,
-  adSpans: AdSpan[]
+  adSpans: AdSpan[],
+  tier: TranscriberTier
 ): Promise<AudioRewriteResult> {
   const gatewayResponse = await fetchRewriteFromGateway(
     env,
@@ -170,7 +172,8 @@ async function rewriteAudioViaGateway(
         start_ms: span.startMs,
         end_ms: span.endMs
       }))
-    })
+    }),
+    tier
   );
   const manifestHeader = gatewayResponse.headers.get(AUDIO_REWRITE_MANIFEST_HEADER);
   if (!manifestHeader) {
@@ -221,7 +224,8 @@ export async function rewriteAudio(
   feedId: number,
   episodeId: number,
   processingVersion: string,
-  adSpans: AdSpan[]
+  adSpans: AdSpan[],
+  tier: TranscriberTier
 ): Promise<AudioRewriteResult> {
   if (adSpans.length === 0) {
     return createPassthroughResult(
@@ -241,7 +245,7 @@ export async function rewriteAudio(
 
   if (sourceContentType && canSpliceMp3(sourceContentType)) {
     const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extensionFromContentType(sourceContentType)}`;
-    return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans);
+    return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans, tier);
   }
 
   return createPassthroughResult(

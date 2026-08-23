@@ -1,6 +1,7 @@
 import { summarizeProcessingError } from "@podads/shared";
 
 import type { EpisodeRecord, TranscriptResult, TranscriptSegment } from "../../lib/types";
+import type { TranscriberTier } from "../../lib/containerSizing";
 import { RetryableProcessingError } from "../../lib/retryable";
 import { transcriberFetch } from "../../transcriberContainer";
 
@@ -101,7 +102,8 @@ function parseRetryAfterSeconds(headerValue: string | null, body: string): numbe
 async function fetchGateway(
   env: Env,
   path: string,
-  body: string
+  body: string,
+  tier: TranscriberTier
 ): Promise<Response> {
   try {
     const response = await transcriberFetch(env, path, {
@@ -111,7 +113,7 @@ async function fetchGateway(
       },
       body,
       signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
-    });
+    }, tier);
 
     if (response.ok) {
       return response;
@@ -154,7 +156,8 @@ async function fetchGateway(
 export async function gatewayTranscription(
   env: Env,
   episode: EpisodeRecord,
-  analysisWindowMs?: number
+  analysisWindowMs: number | undefined,
+  tier: TranscriberTier
 ): Promise<TranscriptResult> {
   const t0 = Date.now();
   const response = await fetchGateway(
@@ -163,7 +166,8 @@ export async function gatewayTranscription(
     JSON.stringify({
       url: episode.source_enclosure_url,
       analysis_window_ms: analysisWindowMs
-    })
+    }),
+    tier
   );
 
   const payload = (await response.json()) as GatewayResponse;

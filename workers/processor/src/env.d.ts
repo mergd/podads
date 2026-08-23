@@ -4,6 +4,7 @@ declare global {
     CLASSIFICATION_PROVIDER?: string;
     DISCORD_PROCESSING_FAILURE_WEBHOOK_URL?: string;
     TRANSCRIBER: DurableObjectNamespace;
+    TRANSCRIBER_LARGE: DurableObjectNamespace;
     GROQ_API_KEY?: string;
     GROQ_API_KEYS?: string;
     MISTRAL_API_KEY?: string;

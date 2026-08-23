@@ -1,5 +1,7 @@
 import { Container } from "@cloudflare/containers";
 
+import type { TranscriberTier } from "./lib/containerSizing";
+
 /**
  * Runs services/transcriber (bun + ffmpeg) as a Cloudflare Container so we no
  * longer need Railway. The processor talks to it through the TRANSCRIBER
@@ -9,7 +11,7 @@ import { Container } from "@cloudflare/containers";
  */
 export class TranscriberContainer extends Container<Env> {
   defaultPort = 8000;
-  sleepAfter = "10m";
+  sleepAfter = "1m";
 
   override async onActivityExpired(): Promise<void> {
     console.log("Transcriber idle timeout expired, destroying container");
@@ -37,12 +39,16 @@ export class TranscriberContainer extends Container<Env> {
   }
 }
 
+export class LargeTranscriberContainer extends TranscriberContainer {}
+
 export async function transcriberFetch(
   env: Env,
   path: string,
-  init: RequestInit
+  init: RequestInit,
+  tier: TranscriberTier
 ): Promise<Response> {
-  const id = env.TRANSCRIBER.idFromName("transcriber");
-  const stub = env.TRANSCRIBER.get(id);
+  const namespace = tier === "large" ? env.TRANSCRIBER_LARGE : env.TRANSCRIBER;
+  const id = namespace.idFromName("transcriber");
+  const stub = namespace.get(id);
   return stub.fetch(`http://transcriber${path}`, init);
 }

@@ -4,6 +4,7 @@ import { MAX_AUTOMATIC_EPISODE_PROCESSING_ATTEMPTS } from "@podads/shared/queue"
 
 import { detectAdSpans } from "./adDetection";
 import { rewriteAudio } from "./audioRewrite";
+import { selectTranscriberTier } from "./containerSizing";
 import { notifyEpisodeProcessingFailure } from "./discord";
 import { capturePostHogAiGeneration, capturePostHogEvent } from "./posthog";
 import { getNextRetryAttempt, getRetryDelaySeconds, isRetryableProcessingError } from "./retryable";
@@ -519,17 +520,26 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     return;
   }
 
+  const sourceEnclosureLength =
+    episode.source_enclosure_length && /^\d+$/.test(episode.source_enclosure_length)
+      ? Number.parseInt(episode.source_enclosure_length, 10)
+      : null;
+  const transcriberTier = selectTranscriberTier(sourceEnclosureLength, message.expectedDurationSeconds);
+
   let processingDetails = withProcessingSubstatus(baseProcessingDetails, "transcribing", processingStartedAt, {
     currentJobId: message.jobId,
     enqueuedAt: message.enqueuedAt,
     queueAttempt: message.pollAttempt ?? 0,
     queueDelayMs: Number.isFinite(queueDelayMs) ? queueDelayMs : null,
-    processingStartedAt
+    processingStartedAt,
+    transcriberTier,
+    sourceEnclosureLength,
+    expectedDurationSeconds: message.expectedDurationSeconds ?? null
   });
 
   await markJobProcessing(env.DB, message, JSON.stringify(processingDetails));
 
-  const transcript = await generateTranscript(env, episode, message.processingVersion, {});
+  const transcript = await generateTranscript(env, episode, message.processingVersion, {}, transcriberTier);
   const transcriptDiagnostics = buildTranscriptDiagnostics(transcript);
   logEpisodeProcessingDiagnostics("info", "episode_transcript_diagnostics", episode.id, episode.feed_id, transcriptDiagnostics);
   await capturePostHogEvent(env, distinctId, "transcript_completed", {
@@ -659,11 +669,6 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
   const transcriptKey = `transcripts/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const adSpansKey = `ad-spans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const splicePlanKey = `splice-plans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
-  const sourceEnclosureLength =
-    episode.source_enclosure_length && /^\d+$/.test(episode.source_enclosure_length)
-      ? Number.parseInt(episode.source_enclosure_length, 10)
-      : null;
-
   await putJsonArtifact(env.AUDIO_BUCKET, transcriptKey, transcript, {
     episodeId: String(episode.id),
     feedId: String(episode.feed_id)
@@ -681,7 +686,8 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     episode.feed_id,
     episode.id,
     message.processingVersion,
-    detection.spans
+    detection.spans,
+    transcriberTier
   );
   await putJsonArtifact(env.AUDIO_BUCKET, splicePlanKey, audioOutput.manifest, {
     episodeId: String(episode.id),

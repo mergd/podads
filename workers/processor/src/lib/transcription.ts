@@ -1,4 +1,5 @@
 import { gatewayTranscription } from "../providers/transcription/gateway";
+import type { TranscriberTier } from "./containerSizing";
 import type { EpisodeRecord, TranscriptResult } from "./types";
 
 const MAX_AD_ANALYSIS_DURATION_MS = 2 * 60 * 60 * 1000;
@@ -30,8 +31,9 @@ export async function generateTranscript(
   env: Env,
   episode: EpisodeRecord,
   _processingVersion: string,
-  _state: Record<string, unknown>
+  _state: Record<string, unknown>,
+  tier: TranscriberTier
 ): Promise<TranscriptResult> {
-  const transcript = await gatewayTranscription(env, episode, MAX_AD_ANALYSIS_DURATION_MS);
+  const transcript = await gatewayTranscription(env, episode, MAX_AD_ANALYSIS_DURATION_MS, tier);
   return transcript.analysisWindowMs !== null ? transcript : truncateTranscriptForAnalysis(transcript);
 }

@@ -32,7 +32,7 @@
       {
         "queue": "podads-processing",
         "max_batch_size": 1,
-        "max_retries": 2,
+        "max_retries": 1,
         "retry_delay": 30
       }
     ]
@@ -40,10 +40,23 @@
   "containers": [
     {
       "class_name": "TranscriberContainer",
+      "name": "podads-transcriber-basic",
       "image": "../../services/transcriber/Dockerfile",
       "image_build_context": "../../",
       "max_instances": 1,
-      "instance_type": "standard-1"
+      "instance_type": "basic"
+    },
+    {
+      "class_name": "LargeTranscriberContainer",
+      "name": "podads-transcriber-large",
+      "image": "../../services/transcriber/Dockerfile",
+      "image_build_context": "../../",
+      "max_instances": 1,
+      "instance_type": {
+        "vcpu": 1,
+        "memory_mib": 3072,
+        "disk_mb": 6000
+      }
     }
   ],
   "durable_objects": {
@@ -51,6 +64,10 @@
       {
         "name": "TRANSCRIBER",
         "class_name": "TranscriberContainer"
+      },
+      {
+        "name": "TRANSCRIBER_LARGE",
+        "class_name": "LargeTranscriberContainer"
       }
     ]
   },
@@ -58,6 +75,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["TranscriberContainer"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["LargeTranscriberContainer"]
     }
   ],
   "vars": {
