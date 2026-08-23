@@ -15,10 +15,11 @@ COPY package.json ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY services/transcriber/package.json services/transcriber/package.json
 # Stub out the other workspace members so bun install doesn't error on missing dirs
-RUN mkdir -p ui workers/api workers/processor && \
+RUN mkdir -p ui workers/api workers/processor ad-bench && \
     echo '{"name":"ui","private":true}' > ui/package.json && \
     echo '{"name":"@podads/api","private":true}' > workers/api/package.json && \
-    echo '{"name":"@podads/processor","private":true}' > workers/processor/package.json
+    echo '{"name":"@podads/processor","private":true}' > workers/processor/package.json && \
+    echo '{"name":"@podads/ad-bench","private":true}' > ad-bench/package.json
 RUN bun install --production
 
 COPY packages/shared/ packages/shared/
