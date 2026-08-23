@@ -40,7 +40,6 @@
   "containers": [
     {
       "class_name": "TranscriberContainer",
-      "name": "podads-transcriber-basic",
       "image": "../../services/transcriber/Dockerfile",
       "image_build_context": "../../",
       "max_instances": 1,
