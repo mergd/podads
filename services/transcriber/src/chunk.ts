@@ -8,13 +8,24 @@ import { TRANSCRIPTION_AUDIO_BITRATE, TRANSCRIPTION_AUDIO_SAMPLE_RATE_HZ } from 
 
 const execFileAsync = promisify(execFile);
 
-const MAX_CHUNK_BYTES = 24 * 1024 * 1024; // 24MB — stay under Groq's 25MB limit
-const CHUNK_DURATION_SECONDS = 600; // 10 min per chunk as starting point
+export const MAX_CHUNK_BYTES = 24 * 1024 * 1024;
+export const CHUNK_DURATION_SECONDS = 600;
 
 interface ChunkInfo {
   path: string;
-  /** Offset in seconds from the start of the original audio */
   offsetSeconds: number;
+}
+
+export function resolveChunkDurationSeconds(totalDuration: number, fileSize: number): number | null {
+  if (totalDuration <= CHUNK_DURATION_SECONDS && fileSize <= MAX_CHUNK_BYTES) {
+    return null;
+  }
+
+  const bytesPerSecond = fileSize / totalDuration;
+  const maxDurationForSize =
+    bytesPerSecond > 0 ? Math.floor(MAX_CHUNK_BYTES / bytesPerSecond) : CHUNK_DURATION_SECONDS;
+
+  return Math.max(1, Math.min(CHUNK_DURATION_SECONDS, maxDurationForSize));
 }
 
 async function getAudioDuration(filePath: string): Promise<number> {
@@ -34,17 +45,12 @@ async function getAudioDuration(filePath: string): Promise<number> {
 
 export async function splitAudioIntoChunks(filePath: string): Promise<ChunkInfo[]> {
   const fileSize = (await stat(filePath)).size;
+  const totalDuration = await getAudioDuration(filePath);
+  const chunkDuration = resolveChunkDurationSeconds(totalDuration, fileSize);
 
-  if (fileSize <= MAX_CHUNK_BYTES) {
+  if (chunkDuration === null) {
     return [{ path: filePath, offsetSeconds: 0 }];
   }
-
-  const totalDuration = await getAudioDuration(filePath);
-  const estimatedChunks = Math.ceil(fileSize / MAX_CHUNK_BYTES);
-  const chunkDuration = Math.min(
-    CHUNK_DURATION_SECONDS,
-    Math.floor(totalDuration / estimatedChunks)
-  );
 
   const chunks: ChunkInfo[] = [];
 

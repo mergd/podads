@@ -15,5 +15,8 @@
     "src",
     "../../packages/shared/src/audio.ts",
     "../../packages/shared/src/mp3-parser.d.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ]
 }
