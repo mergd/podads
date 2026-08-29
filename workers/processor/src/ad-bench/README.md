@@ -21,7 +21,7 @@ Pass: leftover ≤ 30s, overcut ≤ 45s, F1 ≥ 0.8. Empty gold (no ads) fails i
 Needs `OPENROUTER_API_KEY`. Transcripts cache under `src/ad-bench/.cache` after the first R2 pull.
 
 ```bash
-# full bench, 5 runs, default OSS + Gemini Flash Lite + Luna
+# full bench, 5 runs, default models
 ap run openrouter -- bun run ad-bench
 
 # smoke

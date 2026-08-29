@@ -10,7 +10,6 @@ const FALLBACK: BenchOutput = {
   models: [
     "qwen/qwen3.7-flash",
     "deepseek/deepseek-v4-flash-0731",
-    "openai/gpt-oss-120b",
     "google/gemini-3.1-flash-lite",
     "openai/gpt-5.6-luna"
   ],

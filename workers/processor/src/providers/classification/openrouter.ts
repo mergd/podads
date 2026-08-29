@@ -147,6 +147,13 @@ function providerRoutingForModel(model: string): Record<string, unknown> | undef
     };
   }
 
+  if (model.startsWith("openai/")) {
+    return {
+      only: ["openai"],
+      allow_fallbacks: false
+    };
+  }
+
   return undefined;
 }
 

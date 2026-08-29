@@ -1,7 +1,6 @@
 export const MODEL_LABELS: Record<string, string> = {
   "qwen/qwen3.7-flash": "Qwen 3.7 Flash",
   "deepseek/deepseek-v4-flash-0731": "DeepSeek V4 Flash",
-  "openai/gpt-oss-120b": "GPT-OSS 120B",
   "google/gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
   "openai/gpt-5.6-luna": "GPT-5.6 Luna"
 };

@@ -19,7 +19,7 @@
       "id": "lex-ffmpeg",
       "episodeId": 1134450,
       "feed": "Lex Fridman Podcast",
-      "title": "#496 – FFmpeg: The Incredible Technology Behind Video on the Internet",
+      "title": "#496 \u2013 FFmpeg: The Incredible Technology Behind Video on the Internet",
       "transcriptKey": "transcripts/4/1134450/v1.json",
       "notes": "Long-context host-read stack (~7 min) after a long editorial intro. 2h analyzed window.",
       "tags": [
@@ -66,7 +66,6 @@
   "models": [
     "qwen/qwen3.7-flash",
     "deepseek/deepseek-v4-flash-0731",
-    "openai/gpt-oss-120b",
     "google/gemini-3.1-flash-lite",
     "openai/gpt-5.6-luna"
   ],
@@ -227,59 +226,6 @@
           "f1": 0.8154385326111694,
           "leftoverMs": 540,
           "overcutMs": 80560
-        }
-      ]
-    },
-    {
-      "model": "openai/gpt-oss-120b",
-      "passedCases": 2,
-      "caseCount": 5,
-      "f1": 0.833721771840151,
-      "f1Std": 0.21588585588699435,
-      "leftoverMs": 99550,
-      "overcutMs": 2016,
-      "costUsd": 0.00444394566,
-      "errors": 0,
-      "cases": [
-        {
-          "caseId": "jasmine-sun",
-          "passed": false,
-          "passRate": 0,
-          "f1": 0.45809167040310095,
-          "leftoverMs": 374670,
-          "overcutMs": 0
-        },
-        {
-          "caseId": "lex-ffmpeg",
-          "passed": false,
-          "passRate": 0,
-          "f1": 0.9223506743737957,
-          "leftoverMs": 64440,
-          "overcutMs": 40
-        },
-        {
-          "caseId": "short-wave-avocados",
-          "passed": true,
-          "passRate": 1,
-          "f1": 0.9297083089716105,
-          "leftoverMs": 21590,
-          "overcutMs": 50
-        },
-        {
-          "caseId": "signals-threads",
-          "passed": true,
-          "passRate": 1,
-          "f1": 1,
-          "leftoverMs": 0,
-          "overcutMs": 0
-        },
-        {
-          "caseId": "planet-money-big-box",
-          "passed": false,
-          "passRate": 0,
-          "f1": 0.8584582054522477,
-          "leftoverMs": 37050,
-          "overcutMs": 9990
         }
       ]
     },
@@ -603,194 +549,6 @@
       "run": 1,
       "status": "error",
       "error": "The operation timed out."
-    },
-    {
-      "model": "openai/gpt-oss-120b",
-      "caseId": "jasmine-sun",
-      "run": 1,
-      "status": "ok",
-      "score": {
-        "predictedMs": 158360,
-        "goldMs": 533030,
-        "intersectionMs": 158360,
-        "leftoverMs": 374670,
-        "overcutMs": 0,
-        "precision": 1,
-        "recall": 0.2970939721966869,
-        "f1": 0.45809167040310095,
-        "passed": false
-      },
-      "billedCostUsd": 0.0057832038,
-      "estimatedCostUsd": 0.0057832038,
-      "promptTokens": 28325,
-      "completionTokens": 4016,
-      "requestDurationMs": 885,
-      "spanCount": 5,
-      "spans": [
-        {
-          "startMs": 16120,
-          "endMs": 105800
-        },
-        {
-          "startMs": 947430,
-          "endMs": 957790
-        },
-        {
-          "startMs": 963230,
-          "endMs": 1012670
-        },
-        {
-          "startMs": 2131380,
-          "endMs": 2138340
-        },
-        {
-          "startMs": 3595200,
-          "endMs": 3597120
-        }
-      ]
-    },
-    {
-      "model": "openai/gpt-oss-120b",
-      "caseId": "lex-ffmpeg",
-      "run": 1,
-      "status": "ok",
-      "score": {
-        "predictedMs": 383000,
-        "goldMs": 447400,
-        "intersectionMs": 382960,
-        "leftoverMs": 64440,
-        "overcutMs": 40,
-        "precision": 0.9998955613577023,
-        "recall": 0.8559678140366562,
-        "f1": 0.9223506743737957,
-        "passed": false
-      },
-      "billedCostUsd": 0.0071464734,
-      "estimatedCostUsd": 0.0071464734,
-      "promptTokens": 55257,
-      "completionTokens": 2288,
-      "requestDurationMs": 1620,
-      "spanCount": 4,
-      "spans": [
-        {
-          "startMs": 179960,
-          "endMs": 222200
-        },
-        {
-          "startMs": 224800,
-          "endMs": 537280
-        },
-        {
-          "startMs": 542760,
-          "endMs": 559200
-        },
-        {
-          "startMs": 613760,
-          "endMs": 625600
-        }
-      ]
-    },
-    {
-      "model": "openai/gpt-oss-120b",
-      "caseId": "short-wave-avocados",
-      "run": 1,
-      "status": "ok",
-      "score": {
-        "predictedMs": 143160,
-        "goldMs": 164700,
-        "intersectionMs": 143110,
-        "leftoverMs": 21590,
-        "overcutMs": 50,
-        "precision": 0.9996507404302878,
-        "recall": 0.8689131754705525,
-        "f1": 0.9297083089716105,
-        "passed": true
-      },
-      "billedCostUsd": 0.0015797034,
-      "estimatedCostUsd": 0.0015797034,
-      "promptTokens": 4757,
-      "completionTokens": 1524,
-      "requestDurationMs": 331,
-      "spanCount": 3,
-      "spans": [
-        {
-          "startMs": 0,
-          "endMs": 12720
-        },
-        {
-          "startMs": 96080,
-          "endMs": 168520
-        },
-        {
-          "startMs": 657130,
-          "endMs": 715130
-        }
-      ]
-    },
-    {
-      "model": "openai/gpt-oss-120b",
-      "caseId": "signals-threads",
-      "run": 1,
-      "status": "ok",
-      "score": {
-        "predictedMs": 0,
-        "goldMs": 0,
-        "intersectionMs": 0,
-        "leftoverMs": 0,
-        "overcutMs": 0,
-        "precision": 1,
-        "recall": 1,
-        "f1": 1,
-        "passed": true
-      },
-      "billedCostUsd": 0.0047432583,
-      "estimatedCostUsd": 0.0047432583,
-      "promptTokens": 45773,
-      "completionTokens": 289,
-      "requestDurationMs": 1289,
-      "spanCount": 0,
-      "spans": []
-    },
-    {
-      "model": "openai/gpt-oss-120b",
-      "caseId": "planet-money-big-box",
-      "run": 1,
-      "status": "ok",
-      "score": {
-        "predictedMs": 152640,
-        "goldMs": 179700,
-        "intersectionMs": 142650,
-        "leftoverMs": 37050,
-        "overcutMs": 9990,
-        "precision": 0.9345518867924528,
-        "recall": 0.7938230383973289,
-        "f1": 0.8584582054522477,
-        "passed": false
-      },
-      "billedCostUsd": 0.0029670894,
-      "estimatedCostUsd": 0.0029670894,
-      "promptTokens": 17871,
-      "completionTokens": 1644,
-      "requestDurationMs": 593,
-      "spanCount": 4,
-      "spans": [
-        {
-          "startMs": 0,
-          "endMs": 22520
-        },
-        {
-          "startMs": 304520,
-          "endMs": 361240
-        },
-        {
-          "startMs": 1597210,
-          "endMs": 1619410
-        },
-        {
-          "startMs": 2431370,
-          "endMs": 2482570
-        }
-      ]
     },
     {
       "model": "google/gemini-3.1-flash-lite",

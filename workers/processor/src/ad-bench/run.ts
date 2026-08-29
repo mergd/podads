@@ -20,7 +20,6 @@ const DEFAULT_RUNS = 5;
 const DEFAULT_MODELS = [
   "qwen/qwen3.7-flash",
   "deepseek/deepseek-v4-flash-0731",
-  "openai/gpt-oss-120b",
   "google/gemini-3.1-flash-lite",
   "openai/gpt-5.6-luna"
 ] as const;
@@ -29,7 +28,6 @@ const DEFAULT_MODELS = [
 const LIST_PRICE_PER_M: Record<string, { input: number; output: number }> = {
   "qwen/qwen3.7-flash": { input: 0.03, output: 0.13 },
   "deepseek/deepseek-v4-flash-0731": { input: 0.08, output: 0.18 },
-  "openai/gpt-oss-120b": { input: 0.037, output: 0.17 },
   "google/gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
   "openai/gpt-5.6-luna": { input: 0.2, output: 1.2 }
 };
