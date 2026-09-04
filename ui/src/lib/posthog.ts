@@ -12,7 +12,7 @@ export function initPostHog(): void {
 
   posthog.init(apiKey, {
     api_host: apiHost,
-    capture_pageview: true,
+    capture_pageview: "history_change",
     autocapture: true,
     person_profiles: "identified_only"
   });
