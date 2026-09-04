@@ -26,6 +26,7 @@ export interface TranscriptResult {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  sourceCacheId?: string;
 }
 
 export interface AdSpan {

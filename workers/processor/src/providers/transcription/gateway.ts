@@ -26,6 +26,7 @@ interface GatewayResponse {
     download_ms?: number;
     prepare_ms?: number;
     source_input_bytes?: number;
+    source_cache_id?: string;
     prepared_input_bytes?: number;
     transcribe_seconds?: number;
     realtime_factor?: number;
@@ -198,6 +199,7 @@ export async function gatewayTranscription(
     inputBytes: meta?.prepared_input_bytes,
     requestDurationMs,
     providerQueueDelayMs: sumDefinedNumbers(meta?.download_ms, meta?.prepare_ms),
-    providerExecutionMs: meta?.transcribe_seconds ? Math.round(meta.transcribe_seconds * 1000) : undefined
+    providerExecutionMs: meta?.transcribe_seconds ? Math.round(meta.transcribe_seconds * 1000) : undefined,
+    sourceCacheId: typeof meta?.source_cache_id === "string" ? meta.source_cache_id : undefined
   };
 }

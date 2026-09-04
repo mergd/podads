@@ -4,6 +4,7 @@ import multipart from "@fastify/multipart";
 import {
   AudioRewriteTimeoutError,
   buildRewriteResponseHeaders,
+  rewriteAudioFromPath,
   rewriteAudioFromUrl,
   type RewriteSpan
 } from "./rewrite.js";
@@ -39,7 +40,21 @@ const groqKeys = parseGroqKeyConfigs(GROQ_API_KEYS, GROQ_API_KEY);
 const groqKeyPool = createGroqKeyPool(groqKeys);
 
 const app = Fastify({ logger: true, bodyLimit: 200 * 1024 * 1024 });
+const SOURCE_CACHE_TTL_MS = 20 * 60 * 1000;
+const sourceCache = new Map<string, { path: string; expiresAt: number }>();
 let shuttingDown = false;
+
+function cacheSourceAudio(path: string): string {
+  const cacheId = crypto.randomUUID();
+  sourceCache.set(cacheId, { path, expiresAt: Date.now() + SOURCE_CACHE_TTL_MS });
+  setTimeout(() => {
+    const cached = sourceCache.get(cacheId);
+    if (!cached || cached.expiresAt > Date.now()) return;
+    sourceCache.delete(cacheId);
+    void cleanupFile(cached.path);
+  }, SOURCE_CACHE_TTL_MS + 1_000).unref();
+  return cacheId;
+}
 
 async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
   if (shuttingDown) {
@@ -82,6 +97,7 @@ interface TranscribeBody {
 
 interface RewriteBody {
   url?: string;
+  source_cache_id?: string;
   source_content_type?: string | null;
   ad_spans?: Array<{
     start_ms?: number;
@@ -164,6 +180,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
   let analysisWindowMs: number | null = null;
   let sourceInputBytes: number | undefined;
   let preparedInputBytes: number | undefined;
+  let sourceCacheId: string | undefined;
 
   try {
     let rawAudioPath: string;
@@ -307,6 +324,8 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     const truncated = truncateTranscriptionResult(result, analysisWindowMs);
     result = truncated.result;
     const elapsed = (Date.now() - start) / 1000;
+    sourceCacheId = cacheSourceAudio(rawAudioPath);
+    filesToCleanup.splice(filesToCleanup.indexOf(rawAudioPath), 1);
 
     return {
       text: result.text,
@@ -321,6 +340,7 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         download_ms: downloadMs,
         prepare_ms: prepareMs,
         source_input_bytes: sourceInputBytes,
+        source_cache_id: sourceCacheId,
         prepared_input_bytes: preparedInputBytes,
         analysis_window_ms: analysisWindowMs,
         analysis_truncated: truncated.analysisTruncated,
@@ -346,19 +366,35 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
 app.post<{ Body: RewriteBody }>("/v1/audio/rewrite", async (request, reply) => {
   const body = request.body as RewriteBody;
   const url = typeof body.url === "string" ? body.url : null;
+  const sourceCacheId = typeof body.source_cache_id === "string" ? body.source_cache_id : null;
   const adSpans = normalizeRewriteSpans(body.ad_spans);
 
-  if (!url || adSpans === null) {
-    return reply.status(400).send({ error: "Provide a JSON body with 'url' and valid 'ad_spans'" });
+  if ((!url && !sourceCacheId) || adSpans === null) {
+    return reply.status(400).send({ error: "Provide 'source_cache_id' or 'url' and valid 'ad_spans'" });
   }
 
   let result;
+  let cachedPath: string | null = null;
   try {
-    result = await rewriteAudioFromUrl({
-      url,
-      sourceContentType: typeof body.source_content_type === "string" ? body.source_content_type : null,
-      adSpans
-    });
+    if (sourceCacheId) {
+      const cached = sourceCache.get(sourceCacheId);
+      if (!cached || cached.expiresAt <= Date.now()) {
+        return reply.status(503).send({ error: "Transcription source cache expired; retry the episode" });
+      }
+      sourceCache.delete(sourceCacheId);
+      cachedPath = cached.path;
+      result = await rewriteAudioFromPath({
+        path: cachedPath,
+        sourceContentType: typeof body.source_content_type === "string" ? body.source_content_type : null,
+        adSpans
+      });
+    } else {
+      result = await rewriteAudioFromUrl({
+        url: url!,
+        sourceContentType: typeof body.source_content_type === "string" ? body.source_content_type : null,
+        adSpans
+      });
+    }
   } catch (error) {
     if (error instanceof AudioRewriteTimeoutError) {
       const retryAfterSeconds = 30;
@@ -370,6 +406,8 @@ app.post<{ Body: RewriteBody }>("/v1/audio/rewrite", async (request, reply) => {
     }
 
     throw error;
+  } finally {
+    if (cachedPath) await cleanupFile(cachedPath);
   }
 
   const responseHeaders = buildRewriteResponseHeaders(result);

@@ -49,6 +49,12 @@ export interface RewriteAudioRequest {
   adSpans: RewriteSpan[];
 }
 
+export interface RewriteCachedAudioRequest {
+  path: string;
+  sourceContentType: string | null;
+  adSpans: RewriteSpan[];
+}
+
 export interface RewriteAudioResult {
   contentType: string;
   bytes: Uint8Array;
@@ -251,34 +257,45 @@ export async function rewriteAudioFromUrl(input: RewriteAudioRequest): Promise<R
 
   try {
     const downloadMs = Date.now() - downloadStartedAt;
-    const sourceBytes = await getFileSizeBytes(audioPath);
-    const contentType = input.sourceContentType ?? "audio/mpeg";
-    const sourceBuffer = await readFile(audioPath);
-    const rewriteStartedAt = Date.now();
+    return await rewriteAudioFromPath({
+      path: audioPath,
+      sourceContentType: input.sourceContentType,
+      adSpans: input.adSpans
+    }, downloadMs);
+  } finally {
+    await cleanupFile(audioPath);
+  }
+}
 
-    if (input.adSpans.length === 0 || !canSpliceMp3(contentType)) {
-      return {
-        contentType,
-        bytes: sourceBuffer,
-        manifest: createPassthroughManifest(contentType, input.adSpans),
-        sourceBytes,
-        downloadMs,
-        rewriteMs: Date.now() - rewriteStartedAt
-      };
-    }
+export async function rewriteAudioFromPath(
+  input: RewriteCachedAudioRequest,
+  downloadMs = 0
+): Promise<RewriteAudioResult> {
+  const sourceBytes = await getFileSizeBytes(input.path);
+  const contentType = input.sourceContentType ?? "audio/mpeg";
+  const sourceBuffer = await readFile(input.path);
+  const rewriteStartedAt = Date.now();
 
-    const rewritten = await rewriteMp3WithFfmpeg(audioPath, input.adSpans);
+  if (input.adSpans.length === 0 || !canSpliceMp3(contentType)) {
     return {
-      contentType: OUTPUT_CONTENT_TYPE,
-      bytes: rewritten.bytes,
-      manifest: rewritten.manifest,
+      contentType,
+      bytes: sourceBuffer,
+      manifest: createPassthroughManifest(contentType, input.adSpans),
       sourceBytes,
       downloadMs,
       rewriteMs: Date.now() - rewriteStartedAt
     };
-  } finally {
-    await cleanupFile(audioPath);
   }
+
+  const rewritten = await rewriteMp3WithFfmpeg(input.path, input.adSpans);
+  return {
+    contentType: OUTPUT_CONTENT_TYPE,
+    bytes: rewritten.bytes,
+    manifest: rewritten.manifest,
+    sourceBytes,
+    downloadMs,
+    rewriteMs: Date.now() - rewriteStartedAt
+  };
 }
 
 export function buildRewriteResponseHeaders(result: RewriteAudioResult): Record<string, string> {

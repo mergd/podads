@@ -669,7 +669,8 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
   const transcriptKey = `transcripts/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const adSpansKey = `ad-spans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
   const splicePlanKey = `splice-plans/${episode.feed_id}/${episode.id}/${message.processingVersion}.json`;
-  await putJsonArtifact(env.AUDIO_BUCKET, transcriptKey, transcript, {
+  const { sourceCacheId: _sourceCacheId, ...persistedTranscript } = transcript;
+  await putJsonArtifact(env.AUDIO_BUCKET, transcriptKey, persistedTranscript, {
     episodeId: String(episode.id),
     feedId: String(episode.feed_id)
   });
@@ -687,7 +688,8 @@ export async function processEpisodeJob(env: Env, message: EpisodeJobMessage): P
     episode.id,
     message.processingVersion,
     detection.spans,
-    transcriberTier
+    transcriberTier,
+    transcript.sourceCacheId
   );
   await putJsonArtifact(env.AUDIO_BUCKET, splicePlanKey, audioOutput.manifest, {
     episodeId: String(episode.id),

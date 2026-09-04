@@ -160,13 +160,15 @@ async function rewriteAudioViaGateway(
   key: string,
   processingVersion: string,
   adSpans: AdSpan[],
-  tier: TranscriberTier
+  tier: TranscriberTier,
+  sourceCacheId?: string
 ): Promise<AudioRewriteResult> {
   const gatewayResponse = await fetchRewriteFromGateway(
     env,
     "/v1/audio/rewrite",
     JSON.stringify({
       url: sourceUrl,
+      ...(sourceCacheId ? { source_cache_id: sourceCacheId } : {}),
       source_content_type: sourceContentType,
       ad_spans: adSpans.map((span) => ({
         start_ms: span.startMs,
@@ -225,13 +227,29 @@ export async function rewriteAudio(
   episodeId: number,
   processingVersion: string,
   adSpans: AdSpan[],
-  tier: TranscriberTier
+  tier: TranscriberTier,
+  sourceCacheId?: string
 ): Promise<AudioRewriteResult> {
-  if (adSpans.length === 0) {
+  if (adSpans.length === 0 && !sourceCacheId) {
     return createPassthroughResult(
       sourceContentType ?? "audio/mpeg",
       adSpans,
       "Skipped audio surgery because no ad spans were detected; serving the source enclosure avoids duplicating bytes in R2."
+    );
+  }
+
+  if (adSpans.length === 0 && sourceCacheId) {
+    const contentType = sourceContentType ?? "audio/mpeg";
+    const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extensionFromContentType(contentType)}`;
+    return rewriteAudioViaGateway(
+      env,
+      sourceUrl,
+      contentType,
+      key,
+      processingVersion,
+      adSpans,
+      tier,
+      sourceCacheId
     );
   }
 
@@ -245,7 +263,7 @@ export async function rewriteAudio(
 
   if (sourceContentType && canSpliceMp3(sourceContentType)) {
     const key = `cleaned/${feedId}/${episodeId}/${processingVersion}.${extensionFromContentType(sourceContentType)}`;
-    return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans, tier);
+    return rewriteAudioViaGateway(env, sourceUrl, sourceContentType, key, processingVersion, adSpans, tier, sourceCacheId);
   }
 
   return createPassthroughResult(
