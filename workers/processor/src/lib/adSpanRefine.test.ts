@@ -69,4 +69,13 @@ describe("refineAdSpans", () => {
 
     expect(refined?.startMs).toBe(startMs);
   });
+
+  test("allows a default ad span to run for twelve minutes", () => {
+    const [refined] = refineAdSpans(
+      [span(100_000, 900_000)],
+      transcript([segment(100_000, 900_000, "long promotional read")])
+    );
+
+    expect(refined?.endMs).toBe(820_000);
+  });
 });

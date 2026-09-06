@@ -12,8 +12,7 @@ import type {
 } from "./types";
 
 type ClassificationProvider = "mock" | "openrouter";
-const DEFAULT_AD_SPAN_MAX_DURATION_MS = 6 * 60 * 1000;
-const LEX_FRIDMAN_AD_SPAN_MAX_DURATION_MS = 12 * 60 * 1000;
+const DEFAULT_AD_SPAN_MAX_DURATION_MS = 12 * 60 * 1000;
 const SNAP_WINDOW_MS = 5_000;
 const MIN_SILENCE_GAP_MS = 80;
 const INTERIOR_SNAP_GUARD_MS = 400;
@@ -139,20 +138,8 @@ function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function isLexFridmanFeed(context: AdDetectionContext): boolean {
-  const haystack = [context.feedTitle, context.feedSlug]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .join(" ")
-    .replace(/[-_]+/g, " ")
-    .toLowerCase();
-
-  return haystack.includes("lex fridman");
-}
-
 function getAdSpanMaxDurationMs(context: AdDetectionContext): number {
-  return isLexFridmanFeed(context)
-    ? LEX_FRIDMAN_AD_SPAN_MAX_DURATION_MS
-    : DEFAULT_AD_SPAN_MAX_DURATION_MS;
+  return DEFAULT_AD_SPAN_MAX_DURATION_MS;
 }
 
 function isPromotionalSegment(text: string): boolean {
