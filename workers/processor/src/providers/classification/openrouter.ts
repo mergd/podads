@@ -89,10 +89,12 @@ export function buildAdClassificationPrompt(
     "Whisper often glues the last interview clause and the first ad clause onto one line. Do not take that whole line.",
     "Estimate the split from the words: if the first 3 of 7 words are still editorial, startOffset is 3/7.",
     "When the line has a sentence boundary, pause, or music-bed cue, land the offset there rather than at 0 or 1.",
-    "Only include host-read ads, sponsorship reads, promo codes, partner messaging, or explicit product promotions.",
-    "Do not include editorial chatter, intro, outro, or self-referential jokes unless clearly promotional.",
+    "Only include third-party paid advertising, sponsorship reads, partner messaging, promo codes, or explicit product promotions.",
+    "The show's own events, merchandise, games, newsletters, memberships, and websites are editorial self-promotion, not ads; do not remove them even when they have a call to action.",
+    "Do not include other editorial chatter, intros, outros, or self-referential jokes.",
     "When an ad pod is concentrated in one block, prefer the net start and net end of the whole promotional block rather than splitting it into evenly spaced micro-spans.",
-    "Include adjacent ad copy that belongs to the same spot, such as sponsor tags, legal disclaimers, pricing details, URLs, promo codes, and short bridge lines that are still part of the paid read.",
+    "Include an ad's full creative: dialogue and setup immediately before the brand name, sponsor tags, legal disclaimers, pricing details, URLs, promo codes, and closing lines. A brand mention is not necessarily the beginning of an ad.",
+    "Native third-party sponsored capsules are paid inventory. When a named segment is explicitly introduced and closed as 'brought to you by [brand]', return one enclosing ad span for the entire capsule, including any news report or editorial-sounding material between its sponsor bookends. Do not split out and retain that middle.",
     "Ad pods often land near round durations such as about 30s, 60s, 90s, 120s, or 180s. Use that only as a weak prior when the transcript supports it, not as a hard rule.",
     ...(maxSpanDurationMinutes === null
       ? []
