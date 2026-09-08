@@ -39,10 +39,22 @@ function clampUnitInterval(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function msAtSegmentOffset(
+export function msAtSegmentOffset(
   segment: TranscriptResult["segments"][number],
-  offset: number
+  offset: number,
+  edge: "start" | "end"
 ): number {
+  const words = segment.words;
+  if (words && words.length > 0 && offset > 0 && offset < 1) {
+    if (edge === "start") {
+      const wordIndex = Math.min(words.length - 1, Math.max(0, Math.floor(offset * words.length)));
+      return words[wordIndex]?.startMs ?? segment.startMs;
+    }
+
+    const wordIndex = Math.min(words.length - 1, Math.max(0, Math.ceil(offset * words.length) - 1));
+    return words[wordIndex]?.endMs ?? segment.endMs;
+  }
+
   return segment.startMs + (segment.endMs - segment.startMs) * offset;
 }
 
@@ -129,8 +141,8 @@ function normalizeOpenRouterSpans(
       const endOffset = clampUnitInterval(span.endOffset, 1);
 
       return {
-        startMs: Math.max(0, Math.round(msAtSegmentOffset(startSegment, startOffset))),
-        endMs: Math.max(0, Math.round(msAtSegmentOffset(endSegment, endOffset))),
+        startMs: Math.max(0, Math.round(msAtSegmentOffset(startSegment, startOffset, "start"))),
+        endMs: Math.max(0, Math.round(msAtSegmentOffset(endSegment, endOffset, "end"))),
         confidence:
           typeof span.confidence === "number" && Number.isFinite(span.confidence)
             ? Math.max(0, Math.min(1, span.confidence))

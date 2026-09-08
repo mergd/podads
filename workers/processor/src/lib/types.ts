@@ -8,6 +8,13 @@ export interface TranscriptSegment {
   startMs: number;
   endMs: number;
   text: string;
+  words?: TranscriptWord[];
+}
+
+export interface TranscriptWord {
+  startMs: number;
+  endMs: number;
+  text: string;
 }
 
 export interface TranscriptResult {
@@ -27,6 +34,8 @@ export interface TranscriptResult {
   completionTokens?: number;
   totalTokens?: number;
   sourceCacheId?: string;
+  transcriptionQualityRetryAttempted?: boolean;
+  transcriptionQualityRetrySucceeded?: boolean;
 }
 
 export interface AdSpan {

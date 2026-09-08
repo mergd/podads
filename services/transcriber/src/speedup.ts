@@ -109,13 +109,18 @@ function summarizeFfmpegFailure(error: ExecFileException): string {
 export async function prepareAudioForTranscription(
   inputPath: string,
   multiplier: number,
-  analysisWindowMs: number | null
+  analysisWindowMs: number | null,
+  startOffsetMs = 0
 ): Promise<string> {
   const outputPath = join(tmpdir(), `prepared-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`);
   const ffmpegArgs = [
     "-y",
     "-hide_banner",
   ];
+
+  if (startOffsetMs > 0) {
+    ffmpegArgs.push("-ss", String(startOffsetMs / 1000));
+  }
 
   if (analysisWindowMs !== null) {
     ffmpegArgs.push("-t", String(analysisWindowMs / 1000));

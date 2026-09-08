@@ -19,6 +19,7 @@ import {
   type TranscriptionResult
 } from "./groq.js";
 import { MistralRetryableError, transcribeWithMistral } from "./mistral.js";
+import { retrySuspiciousGroqSegment } from "./qualityRetry.js";
 import {
   AudioPrepareError,
   AudioPrepareTimeoutError,
@@ -157,7 +158,11 @@ function truncateTranscriptionResult(
     .filter((segment) => (segment.start * 1000) < analysisWindowMs)
     .map((segment) => ({
       ...segment,
-      end: Math.min(segment.end, analysisWindowSeconds)
+      end: Math.min(segment.end, analysisWindowSeconds),
+      words: segment.words
+        ?.filter((word) => word.start < analysisWindowSeconds)
+        .map((word) => ({ ...word, end: Math.min(word.end, analysisWindowSeconds) }))
+        .filter((word) => word.end > word.start)
     }))
     .filter((segment) => segment.end > segment.start);
 
@@ -236,6 +241,8 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
     preparedInputBytes = await getFileSizeBytes(preparedAudioPath);
 
     let result: TranscriptionResult;
+    let qualityRetryAttempted = false;
+    let qualityRetrySucceeded = false;
 
     try {
       if (groqKeyPool.size > 0) {
@@ -321,6 +328,17 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
       throw error;
     }
 
+    if (result.provider === "groq") {
+      const qualityRetry = await retrySuspiciousGroqSegment(rawAudioPath, result, groqKeyPool);
+      result = qualityRetry.result;
+      qualityRetryAttempted = qualityRetry.attempted;
+      qualityRetrySucceeded = qualityRetry.succeeded;
+
+      if (qualityRetry.attempted && !qualityRetry.succeeded) {
+        request.log.warn({ error: qualityRetry.error }, "Whisper quality retry did not improve a suspicious segment");
+      }
+    }
+
     const truncated = truncateTranscriptionResult(result, analysisWindowMs);
     result = truncated.result;
     const elapsed = (Date.now() - start) / 1000;
@@ -344,6 +362,8 @@ app.post<{ Body: TranscribeBody }>("/v1/audio/transcriptions", async (request, r
         prepared_input_bytes: preparedInputBytes,
         analysis_window_ms: analysisWindowMs,
         analysis_truncated: truncated.analysisTruncated,
+        quality_retry_attempted: qualityRetryAttempted,
+        quality_retry_succeeded: qualityRetrySucceeded,
         transcribe_seconds: Math.round(elapsed * 100) / 100,
         realtime_factor: elapsed > 0 ? Math.round((result.duration / elapsed) * 10) / 10 : 0,
       },

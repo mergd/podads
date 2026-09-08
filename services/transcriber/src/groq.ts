@@ -12,15 +12,36 @@ interface GroqSegment {
   text: string;
 }
 
+interface GroqWord {
+  start: number;
+  end: number;
+  word: string;
+}
+
 interface GroqResponse {
   text: string;
   segments: GroqSegment[];
+  words?: GroqWord[];
   duration?: number;
+}
+
+export interface TranscriptionWord {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TranscriptionSegment {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  words?: TranscriptionWord[];
 }
 
 export interface TranscriptionResult {
   text: string;
-  segments: { id: number; start: number; end: number; text: string }[];
+  segments: TranscriptionSegment[];
   duration: number;
   provider: "groq" | "mistral";
   model: string;
@@ -210,7 +231,7 @@ export function createGroqKeyPool(configs: GroqKeyConfig[]): GroqKeyPool {
 async function transcribeChunk(
   audioPath: string,
   keyPool: GroqKeyPool,
-): Promise<{ segments: GroqSegment[]; duration: number }> {
+): Promise<{ segments: GroqSegment[]; words: GroqWord[]; duration: number }> {
   return keyPool.withKey(async ({ apiKey }) => {
     const audioData = await readFile(audioPath);
     const blob = new Blob([audioData], { type: "audio/mpeg" });
@@ -221,6 +242,8 @@ async function transcribeChunk(
     form.append("response_format", "verbose_json");
     form.append("language", "en");
     form.append("temperature", "0");
+    form.append("timestamp_granularities[]", "segment");
+    form.append("timestamp_granularities[]", "word");
 
     let response: Response;
     try {
@@ -263,8 +286,60 @@ async function transcribeChunk(
     const payload = (await response.json()) as GroqResponse;
     return {
       segments: payload.segments ?? [],
+      words: payload.words ?? [],
       duration: payload.duration ?? 0,
     };
+  });
+}
+
+function scaleTimestamp(timestampSeconds: number, chunkOffsetSeconds: number, speedMultiplier: number): number {
+  return Math.round((timestampSeconds + chunkOffsetSeconds) * speedMultiplier * 100) / 100;
+}
+
+function normalizeWords(
+  words: GroqWord[],
+  chunkOffsetSeconds: number,
+  speedMultiplier: number
+): TranscriptionWord[] {
+  return words
+    .filter((word) =>
+      Number.isFinite(word.start)
+      && Number.isFinite(word.end)
+      && typeof word.word === "string"
+      && word.end > word.start
+    )
+    .map((word) => ({
+      start: scaleTimestamp(word.start, chunkOffsetSeconds, speedMultiplier),
+      end: scaleTimestamp(word.end, chunkOffsetSeconds, speedMultiplier),
+      text: word.word.trim()
+    }))
+    .filter((word) => word.text.length > 0 && word.end > word.start);
+}
+
+export function attachWordsToSegments(
+  segments: TranscriptionSegment[],
+  words: TranscriptionWord[]
+): TranscriptionSegment[] {
+  let firstCandidateWord = 0;
+
+  return segments.map((segment) => {
+    while (words[firstCandidateWord] && words[firstCandidateWord]!.end <= segment.start) {
+      firstCandidateWord += 1;
+    }
+
+    const segmentWords: TranscriptionWord[] = [];
+    for (let index = firstCandidateWord; index < words.length; index += 1) {
+      const word = words[index]!;
+      if (word.start >= segment.end) {
+        break;
+      }
+
+      if (word.end > segment.start) {
+        segmentWords.push(word);
+      }
+    }
+
+    return segmentWords.length > 0 ? { ...segment, words: segmentWords } : segment;
   });
 }
 
@@ -304,30 +379,33 @@ export async function transcribeWithGroq(
     );
 
     let globalId = 0;
-    const allSegments: { id: number; start: number; end: number; text: string }[] = [];
+    const allSegments: TranscriptionSegment[] = [];
+    const allWords: TranscriptionWord[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]!;
       const result = chunkResults[i]!;
 
       for (const s of result.segments) {
-        const rawStart = s.start + chunk.offsetSeconds;
-        const rawEnd = s.end + chunk.offsetSeconds;
-
         allSegments.push({
           id: globalId++,
-          start: Math.round(rawStart * speedMultiplier * 100) / 100,
-          end: Math.round(rawEnd * speedMultiplier * 100) / 100,
+          start: scaleTimestamp(s.start, chunk.offsetSeconds, speedMultiplier),
+          end: scaleTimestamp(s.end, chunk.offsetSeconds, speedMultiplier),
           text: s.text.trim(),
         });
       }
+
+      allWords.push(...normalizeWords(result.words, chunk.offsetSeconds, speedMultiplier));
     }
 
-    const duration = allSegments.length > 0 ? allSegments[allSegments.length - 1]!.end : 0;
+    allWords.sort((left, right) => left.start - right.start || left.end - right.end);
+    const segments = attachWordsToSegments(allSegments, allWords);
+
+    const duration = segments.length > 0 ? segments[segments.length - 1]!.end : 0;
 
     return {
-      text: allSegments.map((s) => s.text).join(" "),
-      segments: allSegments,
+      text: segments.map((s) => s.text).join(" "),
+      segments,
       duration,
       provider: "groq",
       model: "whisper-large-v3-turbo",

@@ -1,6 +1,6 @@
 import { summarizeProcessingError } from "@podads/shared";
 
-import type { EpisodeRecord, TranscriptResult, TranscriptSegment } from "../../lib/types";
+import type { EpisodeRecord, TranscriptResult, TranscriptSegment, TranscriptWord } from "../../lib/types";
 import type { TranscriberTier } from "../../lib/containerSizing";
 import { RetryableProcessingError } from "../../lib/retryable";
 import { transcriberFetch } from "../../transcriberContainer";
@@ -10,6 +10,11 @@ interface GatewaySegment {
   start: number;
   end: number;
   text: string;
+  words?: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
 }
 
 interface GatewayResponse {
@@ -30,17 +35,47 @@ interface GatewayResponse {
     prepared_input_bytes?: number;
     transcribe_seconds?: number;
     realtime_factor?: number;
+    quality_retry_attempted?: boolean;
+    quality_retry_succeeded?: boolean;
   };
 }
 
-function toSegments(raw: GatewaySegment[]): TranscriptSegment[] {
+function toWords(raw: GatewaySegment["words"]): TranscriptWord[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const words = raw
+    .filter((word) =>
+      typeof word.start === "number"
+      && typeof word.end === "number"
+      && typeof word.text === "string"
+      && Number.isFinite(word.start)
+      && Number.isFinite(word.end)
+      && word.end > word.start
+    )
+    .map((word) => ({
+      startMs: Math.max(0, Math.round(word.start * 1000)),
+      endMs: Math.max(0, Math.round(word.end * 1000)),
+      text: word.text.trim()
+    }))
+    .filter((word) => word.text.length > 0 && word.endMs > word.startMs);
+
+  return words.length > 0 ? words : undefined;
+}
+
+export function toSegments(raw: GatewaySegment[]): TranscriptSegment[] {
   return raw
     .filter((s) => typeof s.start === "number" && typeof s.end === "number" && typeof s.text === "string")
-    .map((s) => ({
-      startMs: Math.max(0, Math.round(s.start * 1000)),
-      endMs: Math.max(0, Math.round(s.end * 1000)),
-      text: s.text.trim()
-    }))
+    .map((s) => {
+      const words = toWords(s.words);
+      return {
+        startMs: Math.max(0, Math.round(s.start * 1000)),
+        endMs: Math.max(0, Math.round(s.end * 1000)),
+        text: s.text.trim(),
+        ...(words ? { words } : {})
+      };
+    })
     .filter((s) => s.text.length > 0 && s.endMs > s.startMs)
     .sort((a, b) => a.startMs - b.startMs);
 }
@@ -200,6 +235,8 @@ export async function gatewayTranscription(
     requestDurationMs,
     providerQueueDelayMs: sumDefinedNumbers(meta?.download_ms, meta?.prepare_ms),
     providerExecutionMs: meta?.transcribe_seconds ? Math.round(meta.transcribe_seconds * 1000) : undefined,
-    sourceCacheId: typeof meta?.source_cache_id === "string" ? meta.source_cache_id : undefined
+    sourceCacheId: typeof meta?.source_cache_id === "string" ? meta.source_cache_id : undefined,
+    transcriptionQualityRetryAttempted: Boolean(meta?.quality_retry_attempted),
+    transcriptionQualityRetrySucceeded: Boolean(meta?.quality_retry_succeeded)
   };
 }
