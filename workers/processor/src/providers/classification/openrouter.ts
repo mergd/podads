@@ -99,14 +99,17 @@ export function buildAdClassificationPrompt(
     "`startOffset` is how far into the start segment the ad begins. `endOffset` is how far into the end segment the ad ends.",
     "If a segment is entirely an ad, use startOffset 0 and/or endOffset 1.",
     "Whisper often glues the last interview clause and the first ad clause onto one line. Do not take that whole line.",
-    "Estimate the split from the words: if the first 3 of 7 words are still editorial, startOffset is 3/7.",
+    "Estimate the split from the word timestamps when available, not from elapsed time or character count. If the first 3 of 7 words are still editorial, startOffset is 3/7 only when that matches the word boundary.",
     "When the line has a sentence boundary, pause, or music-bed cue, land the offset there rather than at 0 or 1.",
+    "For a mixed editorial-to-ad line, leave the complete editorial clause outside the span and begin at the first promotional clause, even if the ad starts near the end of a long transcript segment.",
     "Only include third-party paid advertising, sponsorship reads, partner messaging, promo codes, or explicit product promotions.",
     "The show's own events, merchandise, games, newsletters, memberships, and websites are editorial self-promotion, not ads; do not remove them even when they have a call to action.",
     "Do not include other editorial chatter, intros, outros, or self-referential jokes.",
     "When an ad pod is concentrated in one block, prefer the net start and net end of the whole promotional block rather than splitting it into evenly spaced micro-spans.",
     "Include an ad's full creative: dialogue and setup immediately before the brand name, sponsor tags, legal disclaimers, pricing details, URLs, promo codes, and closing lines. A brand mention is not necessarily the beginning of an ad.",
     "Native third-party sponsored capsules are paid inventory. When a named segment is explicitly introduced and closed as 'brought to you by [brand]', return one enclosing ad span for the entire capsule, including any news report or editorial-sounding material between its sponsor bookends. Do not split out and retain that middle.",
+    "Scan the entire transcript through the final timestamp, including after the host's outro and credits. A third-party conference, event, or branded-content announcement that says it is sponsored by a named company and includes registration or website instructions is paid promotion even when it appears as a post-roll capsule.",
+    "A host's explicit thank-you to named sponsors is part of the sponsor inventory when it follows or closes paid reads; include that acknowledgment if it is adjacent to the removed sponsor pod.",
     "Ad pods often land near round durations such as about 30s, 60s, 90s, 120s, or 180s. Use that only as a weak prior when the transcript supports it, not as a hard rule.",
     ...(maxSpanDurationMinutes === null
       ? []

@@ -22,6 +22,9 @@ describe("buildAdClassificationPrompt", () => {
     expect(prompt).toContain("dialogue and setup immediately before the brand name");
     expect(prompt).toContain("introduced and closed as 'brought to you by [brand]'");
     expect(prompt).toContain("including any news report or editorial-sounding material between its sponsor bookends");
+    expect(prompt).toContain("Scan the entire transcript through the final timestamp");
+    expect(prompt).toContain("word timestamps when available");
+    expect(prompt).toContain("explicit thank-you to named sponsors");
   });
 });
 
