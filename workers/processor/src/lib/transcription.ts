@@ -2,31 +2,6 @@ import { gatewayTranscription } from "../providers/transcription/gateway";
 import type { TranscriberTier } from "./containerSizing";
 import type { EpisodeRecord, TranscriptResult } from "./types";
 
-const MAX_AD_ANALYSIS_DURATION_MS = 2 * 60 * 60 * 1000;
-
-function truncateTranscriptForAnalysis(transcript: TranscriptResult): TranscriptResult {
-  const analysisWindowMs = MAX_AD_ANALYSIS_DURATION_MS;
-  const analysisTruncated = transcript.segments.some((segment) => segment.endMs > analysisWindowMs);
-  const segments = transcript.segments
-    .filter((segment) => segment.startMs < analysisWindowMs)
-    .map((segment) => ({
-      ...segment,
-      endMs: Math.min(segment.endMs, analysisWindowMs)
-    }))
-    .filter((segment) => segment.endMs > segment.startMs);
-  const analyzedDurationMs =
-    segments.length === 0 ? 0 : segments.reduce((max, segment) => Math.max(max, segment.endMs), 0);
-
-  return {
-    ...transcript,
-    text: segments.map((segment) => segment.text).join(" ").trim(),
-    segments,
-    analysisWindowMs,
-    analyzedDurationMs,
-    analysisTruncated
-  };
-}
-
 export async function generateTranscript(
   env: Env,
   episode: EpisodeRecord,
@@ -34,6 +9,5 @@ export async function generateTranscript(
   _state: Record<string, unknown>,
   tier: TranscriberTier
 ): Promise<TranscriptResult> {
-  const transcript = await gatewayTranscription(env, episode, MAX_AD_ANALYSIS_DURATION_MS, tier);
-  return transcript.analysisWindowMs !== null ? transcript : truncateTranscriptForAnalysis(transcript);
+  return gatewayTranscription(env, episode, undefined, tier);
 }

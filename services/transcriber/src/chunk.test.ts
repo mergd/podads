@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { CHUNK_DURATION_SECONDS, MAX_CHUNK_BYTES, resolveChunkDurationSeconds } from "./chunk";
+import {
+  CHUNK_DURATION_SECONDS,
+  MAX_CHUNK_BYTES,
+  chunkStartOffsets,
+  resolveChunkDurationSeconds
+} from "./chunk";
 
 describe("resolveChunkDurationSeconds", () => {
   test("leaves short files under the Groq size cap unsplit", () => {
@@ -22,5 +27,15 @@ describe("resolveChunkDurationSeconds", () => {
     expect(resolveChunkDurationSeconds(CHUNK_DURATION_SECONDS, tenMinuteBytes)).toBe(
       Math.floor(MAX_CHUNK_BYTES / (tenMinuteBytes / CHUNK_DURATION_SECONDS))
     );
+  });
+});
+
+describe("chunkStartOffsets", () => {
+  test("does not create a trailing chunk shorter than the provider minimum", () => {
+    expect(chunkStartOffsets(600.005, 600)).toEqual([0]);
+  });
+
+  test("keeps a substantive final chunk for a long episode", () => {
+    expect(chunkStartOffsets(6451, 600).at(-1)).toBe(6000);
   });
 });

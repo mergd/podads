@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 export const MAX_CHUNK_BYTES = 24 * 1024 * 1024;
 export const CHUNK_DURATION_SECONDS = 600;
+export const MIN_PROVIDER_AUDIO_DURATION_SECONDS = 0.01;
 
 interface ChunkInfo {
   path: string;
@@ -26,6 +27,19 @@ export function resolveChunkDurationSeconds(totalDuration: number, fileSize: num
     bytesPerSecond > 0 ? Math.floor(MAX_CHUNK_BYTES / bytesPerSecond) : CHUNK_DURATION_SECONDS;
 
   return Math.max(1, Math.min(CHUNK_DURATION_SECONDS, maxDurationForSize));
+}
+
+export function chunkStartOffsets(totalDuration: number, chunkDuration: number): number[] {
+  const offsets: number[] = [];
+
+  for (let offset = 0; offset < totalDuration; offset += chunkDuration) {
+    if ((totalDuration - offset) < MIN_PROVIDER_AUDIO_DURATION_SECONDS) {
+      break;
+    }
+    offsets.push(offset);
+  }
+
+  return offsets;
 }
 
 async function getAudioDuration(filePath: string): Promise<number> {
@@ -54,7 +68,7 @@ export async function splitAudioIntoChunks(filePath: string): Promise<ChunkInfo[
 
   const chunks: ChunkInfo[] = [];
 
-  for (let offset = 0; offset < totalDuration; offset += chunkDuration) {
+  for (const offset of chunkStartOffsets(totalDuration, chunkDuration)) {
     const chunkPath = join(
       tmpdir(),
       `chunk-${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`
@@ -71,7 +85,20 @@ export async function splitAudioIntoChunks(filePath: string): Promise<ChunkInfo[
       chunkPath,
     ], { timeout: 60_000 });
 
+    const [chunkSize, encodedDuration] = await Promise.all([
+      stat(chunkPath).then((entry) => entry.size),
+      getAudioDuration(chunkPath)
+    ]);
+    if (chunkSize === 0 || encodedDuration < MIN_PROVIDER_AUDIO_DURATION_SECONDS) {
+      await unlink(chunkPath).catch(() => undefined);
+      continue;
+    }
+
     chunks.push({ path: chunkPath, offsetSeconds: offset });
+  }
+
+  if (chunks.length === 0) {
+    throw new Error("Audio preparation produced no provider-valid chunks.");
   }
 
   return chunks;
