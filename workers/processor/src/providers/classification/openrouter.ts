@@ -7,7 +7,7 @@ import {
 import { RetryableProcessingError } from "../../lib/retryable";
 import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 
-export const OPENROUTER_CLASSIFICATION_MODEL = "openai/gpt-5.6-luna";
+export const OPENROUTER_CLASSIFICATION_MODEL = "openai/gpt-6-luna";
 export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "google/gemini-3.1-flash-lite";
 const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
 
@@ -184,6 +184,7 @@ export async function runOpenRouterClassificationModel(
   const { payload, metrics } = await createOpenRouterChatCompletion(env, {
     model,
     ...(provider ? { provider } : {}),
+    ...(model === OPENROUTER_CLASSIFICATION_MODEL ? { reasoning: { effort: "none" } } : {}),
     temperature: 0.1,
     response_format: {
       type: "json_schema",
