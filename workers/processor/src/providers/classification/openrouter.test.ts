@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildAdClassificationPrompt, msAtSegmentOffset } from "./openrouter";
+import { buildAdClassificationPrompt, msAtSegmentOffset, openRouterClassification } from "./openrouter";
 import type { TranscriptResult, TranscriptSegment } from "../../lib/types";
 
 const transcript: TranscriptResult = {
@@ -44,5 +44,45 @@ describe("msAtSegmentOffset", () => {
 
     expect(msAtSegmentOffset(segment, 0.5, "start")).toBe(18_000);
     expect(msAtSegmentOffset(segment, 0.5, "end")).toBe(1_700);
+  });
+});
+
+describe("openRouterClassification fallback", () => {
+  test("uses Gemini after an OpenAI provider authorization error", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return requests.length === 1
+        ? new Response(JSON.stringify({ error: { message: "Provider returned error", code: 401, metadata: { is_byok: true } } }), { status: 401 })
+        : Response.json({ choices: [{ message: { content: '{"spans":[]}' } }], usage: { cost: 0.0001 } });
+    }) as typeof fetch;
+
+    try {
+      const result = await openRouterClassification({ OPENROUTER_API_KEY: "test" } as Env, transcript);
+      expect(result.model).toBe("google/gemini-3.1-flash-lite");
+      expect(requests.map((request) => request.model)).toEqual(["openai/gpt-6-luna", "google/gemini-3.1-flash-lite"]);
+      expect(requests[0]?.reasoning).toEqual({ effort: "none" });
+      expect(requests.map((request) => request.max_tokens)).toEqual([8192, 8192]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("uses Gemini when Luna returns malformed JSON", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return Response.json({ choices: [{ message: { content: calls === 1 ? "not json" : '{"spans":[]}' } }] });
+    }) as typeof fetch;
+
+    try {
+      const result = await openRouterClassification({ OPENROUTER_API_KEY: "test" } as Env, transcript);
+      expect(result.model).toBe("google/gemini-3.1-flash-lite");
+      expect(calls).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

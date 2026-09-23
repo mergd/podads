@@ -10,6 +10,7 @@ import type { AdDetectionResult, TranscriptResult } from "../../lib/types";
 export const OPENROUTER_CLASSIFICATION_MODEL = "openai/gpt-6-luna";
 export const OPENROUTER_CLASSIFICATION_FALLBACK_MODEL = "google/gemini-3.1-flash-lite";
 const DEFAULT_PREROLL_WINDOW_SECONDS = 120;
+const MAX_CLASSIFICATION_OUTPUT_TOKENS = 8_192;
 
 export interface AdClassificationPromptOptions {
   mentionPrerolls?: boolean;
@@ -186,6 +187,7 @@ export async function runOpenRouterClassificationModel(
     ...(provider ? { provider } : {}),
     ...(model === OPENROUTER_CLASSIFICATION_MODEL ? { reasoning: { effort: "none" } } : {}),
     temperature: 0.1,
+    max_tokens: MAX_CLASSIFICATION_OUTPUT_TOKENS,
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -261,28 +263,39 @@ export async function openRouterClassification(
     mentionPrerolls: true,
     ...options
   };
-  let lastRetryableError: OpenRouterRequestError | null = null;
+  let lastError: unknown;
 
   for (const model of models) {
     try {
       return await runOpenRouterClassificationModel(env, model, transcript, classificationOptions);
     } catch (error) {
-      if (!(error instanceof OpenRouterRequestError)) {
+      // A bad OpenRouter key or an exhausted account-wide limit affects every model.
+      // Provider errors, malformed model output, and transient failures can be
+      // recovered by trying the independent fallback provider.
+      if (error instanceof OpenRouterRequestError && (
+        (error.status === 401 && !error.body.includes('Provider returned error')) ||
+        (error.status === 403 && /key limit exceeded/i.test(error.body)) ||
+        (error.status === 402 && /credits|limit/i.test(error.body))
+      )) {
         throw error;
       }
 
-      if (!isRetryableOpenRouterStatus(error.status)) {
+      if (error instanceof Error && error.message === "Missing OPENROUTER_API_KEY secret.") {
         throw error;
       }
 
-      lastRetryableError = error;
+      lastError = error;
     }
   }
 
-  if (lastRetryableError) {
+  if (lastError) {
+    const retryAfterSeconds = lastError instanceof OpenRouterRequestError &&
+      isRetryableOpenRouterStatus(lastError.status)
+      ? lastError.retryAfterSeconds
+      : undefined;
     throw new RetryableProcessingError(
-      `OpenRouter classification exhausted fallback models (${models.join(" -> ")}): ${lastRetryableError.message}`,
-      lastRetryableError.retryAfterSeconds
+      `OpenRouter classification exhausted fallback models (${models.join(" -> ")}): ${String(lastError)}`,
+      retryAfterSeconds
     );
   }
 
